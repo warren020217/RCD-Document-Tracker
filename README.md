@@ -1,25 +1,16 @@
-# PRO4A RCD Document Tracker - Simple Version
+# PRO4A RCD Document Tracker - Final Connected Build
 
-A separate, mobile-friendly and desktop-friendly frontend for the RCD document routing system.
+Website: https://rcd-document-tracker.vercel.app
+Google Apps Script API: https://script.google.com/macros/s/AKfycbxUZtmJ7JHH6loEN2jXVZJBCbPcsDZFOq69nBinue33YjWZQ_NXE-Zo7D9CkLNILbJm_w/exec
 
-## Included
-- Home dashboard
-- Track by Control Ref ID
-- QR camera scanner
-- Route / Receive
-- Movement history
-- Section-based personnel selection
-- Existing Google Sheets backend compatibility
+IMPORTANT:
+1. Replace the NEW spreadsheet's Code.gs with apps-script/Code.gs.
+2. Save.
+3. Run setupDatabase once only if the tabs need to be created/reset.
+4. Run syncDocuments once with the optimized bulk-sync version.
+5. Deploy the Apps Script as a Web App, execute as the owner, access for the intended users.
+6. Redeploy the Vercel website with this entire package.
 
-## Setup
-1. Open the existing Google Sheet.
-2. Back up the current Apps Script.
-3. Install `apps-script/Code.gs`.
-4. Run `setupRCDSystem()` once and authorize it.
-5. Deploy the Apps Script as a Web App.
-6. Copy the Web App URL.
-7. Put it into `config.js`:
-   `API_URL: "YOUR_WEB_APP_URL"`
-8. Host the four website files: `index.html`, `styles.css`, `app.js`, `config.js`.
-
-Do not activate the system for the whole office until an existing test record has been verified.
+The old Memo Logbook is read-only for this routing system.
+The QR code points to the website, not to the Apps Script endpoint.
+The website uses JSONP for Apps Script browser communication.

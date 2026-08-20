@@ -21,7 +21,8 @@ const CONFIG = {
   SYNC_LOG: "SYNC LOG",
   SETTINGS: "SETTINGS",
 
-  WEB_APP_URL: "https://script.google.com/macros/s/AKfycbxUZtmJ7JHH6loEN2jXVZJBCbPcsDZFOq69nBinue33YjWZQ_NXE-Zo7D9CkLNILbJm_w/exec"
+  WEB_APP_URL: "https://script.google.com/macros/s/AKfycbxUZtmJ7JHH6loEN2jXVZJBCbPcsDZFOq69nBinue33YjWZQ_NXE-Zo7D9CkLNILbJm_w/exec",
+  APP_URL: "https://rcd-document-tracker.vercel.app"
 };
 
 const PERSONNEL = [
@@ -88,17 +89,18 @@ function handleApi_(e, body) {
   try {
     const p = Object.assign({}, body || {}, (e && e.parameter) || {});
     const action = String(p.action || "").trim();
+    const callback = p.callback || "";
 
     if (action === "dashboard") {
-      return json_({result:"success", metrics:getMetrics_()});
+      return json_({result:"success", metrics:getMetrics_()}, callback);
     }
 
     if (action === "getDocument") {
-      return json_(getDocument_(p.id));
+      return json_(getDocument_(p.id), callback);
     }
 
     if (action === "getSections") {
-      return json_({result:"success", sections:SECTIONS});
+      return json_({result:"success", sections:SECTIONS}, callback);
     }
 
     if (action === "getPersonnel") {
@@ -107,34 +109,41 @@ function handleApi_(e, body) {
         personnel:PERSONNEL
           .filter(x => x[1] === String(p.section || "") && x[2] === "YES")
           .map(x => x[0])
-      });
+      }, callback);
     }
 
     if (action === "routeDocument") {
       return json_(routeDocument_(
         p.id, p.movement, p.section, p.personnel, p.remarks
-      ));
+      ), callback);
     }
 
     if (action === "sync") {
       syncDocuments_(false);
-      return json_({result:"success", message:"Synchronization completed."});
+      return json_({result:"success", message:"Synchronization completed."}, callback);
     }
 
     return json_({
       result:"success",
       message:"PRO4A RCD Routing API is online.",
       actions:["dashboard","getDocument","getSections","getPersonnel","routeDocument","sync"]
-    });
+    }, callback);
 
   } catch (err) {
-    return json_({result:"error", error:String(err)});
+    return json_({result:"error", error:String(err)}, ((e && e.parameter && e.parameter.callback) || ""));
   }
 }
 
-function json_(obj) {
+function json_(obj, callback) {
+  const text = JSON.stringify(obj);
+  if (callback) {
+    const safe = String(callback).replace(/[^a-zA-Z0-9_$.]/g, "");
+    return ContentService
+      .createTextOutput(safe + "(" + text + ");")
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
   return ContentService
-    .createTextOutput(JSON.stringify(obj))
+    .createTextOutput(text)
     .setMimeType(ContentService.MimeType.JSON);
 }
 
@@ -198,7 +207,8 @@ function setupDatabase() {
     ["Source Spreadsheet ID",CONFIG.SOURCE_SPREADSHEET_ID],
     ["Source Sheet",CONFIG.SOURCE_SHEET_NAME],
     ["Routing Database Spreadsheet ID",ss.getId()],
-    ["Web App URL",CONFIG.WEB_APP_URL]
+    ["Web App URL",CONFIG.WEB_APP_URL],
+    ["Website URL",CONFIG.APP_URL]
   ]);
   settings.setFrozenRows(1);
 
@@ -319,7 +329,7 @@ function syncDocuments_(showAlert) {
 }
 
 function qrFormula_(id) {
-  const target = CONFIG.WEB_APP_URL + "?id=" + encodeURIComponent(id);
+  const target = CONFIG.APP_URL + "?id=" + encodeURIComponent(id);
   const qr = "https://quickchart.io/qr?text=" + encodeURIComponent(target) + "&size=180";
   return '=IMAGE("' + qr + '")';
 }
