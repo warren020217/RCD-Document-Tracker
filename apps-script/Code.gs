@@ -1,21 +1,27 @@
-/**
- * PRO4A RCD Document Routing System
- * Backend for the separate responsive mobile/desktop website.
- *
- * IMPORTANT:
- * - Existing A:M memo fields are preserved.
- * - New routing fields are N:T.
- * - This script is designed to be installed in the SAME spreadsheet
- *   currently used by the RCD Memo Logbook.
- */
+/*******************************************************
+ PRO4A RCD DOCUMENT ROUTING DATABASE
+ SAFE / FAST VERSION
+
+ OLD SHEET = READ ONLY SOURCE
+ NEW SHEET = ROUTING DATABASE
+
+ This version is optimized for 700+ records and also
+ contains the Web App API used by the website.
+*******************************************************/
 
 const CONFIG = {
-  MAIN_SHEET_NAME: "Memo Logbook",
-  MOVEMENT_SHEET: "MOVEMENT LOG",
-  PERSONNEL_SHEET: "PERSONNEL",
-  SECTIONS_SHEET: "SECTIONS",
-  QR_BASE_URL: "", // Set to deployed web app URL after deployment.
-  DRIVE_FOLDER_ID: "1uUxq2TwM0UWKL06fIAAVMCJNjbGMg-sh"
+  SOURCE_SPREADSHEET_ID: "18GuL5EwafykdUrTBmQKBdQfMIv1BDtios5K-xHjTG1k",
+  SOURCE_SHEET_NAME: "Memo Logbook",
+
+  DOCUMENTS: "DOCUMENTS",
+  MOVEMENT: "MOVEMENT LOG",
+  PERSONNEL: "PERSONNEL",
+  SECTIONS: "SECTIONS",
+  DASHBOARD: "DASHBOARD",
+  SYNC_LOG: "SYNC LOG",
+  SETTINGS: "SETTINGS",
+
+  WEB_APP_URL: "https://script.google.com/macros/s/AKfycbxUZtmJ7JHH6loEN2jXVZJBCbPcsDZFOq69nBinue33YjWZQ_NXE-Zo7D9CkLNILbJm_w/exec"
 };
 
 const PERSONNEL = [
@@ -63,50 +69,66 @@ const SECTIONS = [
   "NFA Section"
 ];
 
+/**************** WEB API ****************/
+
 function doGet(e) {
-  return handleRequest_(e);
-}
-function doPost(e) {
-  return handleRequest_(e);
+  return handleApi_(e, {});
 }
 
-function handleRequest_(e) {
+function doPost(e) {
+  let body = {};
   try {
-    const p = (e && e.parameter) || {};
-    const action = p.action || "";
+    body = e && e.postData && e.postData.contents
+      ? JSON.parse(e.postData.contents) : {};
+  } catch (_) {}
+  return handleApi_(e, body);
+}
+
+function handleApi_(e, body) {
+  try {
+    const p = Object.assign({}, body || {}, (e && e.parameter) || {});
+    const action = String(p.action || "").trim();
+
+    if (action === "dashboard") {
+      return json_({result:"success", metrics:getMetrics_()});
+    }
 
     if (action === "getDocument") {
       return json_(getDocument_(p.id));
     }
+
     if (action === "getSections") {
-      return json_({ result:"success", sections:SECTIONS });
+      return json_({result:"success", sections:SECTIONS});
     }
+
     if (action === "getPersonnel") {
-      return json_({ result:"success", personnel:getPersonnel_(p.section) });
+      return json_({
+        result:"success",
+        personnel:PERSONNEL
+          .filter(x => x[1] === String(p.section || "") && x[2] === "YES")
+          .map(x => x[0])
+      });
     }
+
     if (action === "routeDocument") {
       return json_(routeDocument_(
         p.id, p.movement, p.section, p.personnel, p.remarks
       ));
     }
-    if (action === "dashboard") {
-      return json_({ result:"success", metrics:getDashboard_() });
+
+    if (action === "sync") {
+      syncDocuments_(false);
+      return json_({result:"success", message:"Synchronization completed."});
     }
 
-    // Existing API compatibility
-    if (p.fileData && p.filename) {
-      return uploadFile_(p.fileData, p.filename, p.mimeType);
-    }
-    if (action === "appendMemo" && p.memo) {
-      return appendMemo_(JSON.parse(p.memo));
-    }
-    if (action === "deleteMemo" || action === "deleteMemos") {
-      return deleteMemos_(p);
-    }
+    return json_({
+      result:"success",
+      message:"PRO4A RCD Routing API is online.",
+      actions:["dashboard","getDocument","getSections","getPersonnel","routeDocument","sync"]
+    });
 
-    return json_({ result:"ignored", message:"No matching action handler" });
   } catch (err) {
-    return json_({ result:"error", error:String(err) });
+    return json_({result:"error", error:String(err)});
   }
 }
 
@@ -116,269 +138,405 @@ function json_(obj) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-function getMainSheet_() {
+/**************** SHEET SETUP ****************/
+
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu("RCD ROUTING")
+    .addItem("1. Setup Database","setupDatabase")
+    .addItem("2. Sync Existing Memo Logbook","syncDocuments")
+    .addItem("3. Generate Missing QR Codes","generateQRCodes")
+    .addItem("4. Install Automatic Sync","installAutomaticSync")
+    .addToUi();
+}
+
+function setupDatabase() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  return ss.getSheetByName(CONFIG.MAIN_SHEET_NAME) || ss.getSheets()[0];
-}
 
-function appendMemo_(m) {
-  const sheet = getMainSheet_();
-  const row = sheet.getLastRow() + 1;
-  const now = new Date();
-
-  sheet.getRange(row,1,1,20).setValues([[
-    row - 1,
-    m.id || "",
-    m.dateLogged || "",
-    m.time || "",
-    m.receivedBy || "",
-    m.originatingOffice || "",
-    m.subject || "",
-    m.actionRequired || "",
-    m.remarksStatus || "",
-    m.transmittedOffice || "",
-    m.dateReceived || "",
-    "Inside RCD",
-    m.driveLink || "",
-    "Message Center",
-    m.receivedBy || "",
-    "At Message Center",
-    "",
-    "",
-    "",
-    now
+  const documents = getOrCreateSheet_("DOCUMENTS");
+  documents.clear();
+  documents.getRange(1,1,1,20).setValues([[
+    "Control Ref ID","Source Row","Date Logged","Time","Input / Received By",
+    "Originating Office","Subject / Title of Memo","Action Required",
+    "Remarks / Status","Transmitted Office","Date Received","RCD Location Status",
+    "Google Drive Link","Current Section","Current Personnel","Routing Status",
+    "Forwarded Date/Time","Section Received Date/Time","QR Code","Last Updated"
   ]]);
+  documents.setFrozenRows(1);
 
-  setQrFormula_(sheet, row, m.id || "");
-
-  addMovement_(
-    m.id || "",
-    now,
-    "RECEIVED",
-    "",
-    "Message Center",
-    m.receivedBy || "",
-    "Initial document receipt"
-  );
-
-  return json_({ result:"success", rowAdded:row });
-}
-
-function setQrFormula_(sheet, row, id) {
-  if (!id) return;
-  const base = CONFIG.QR_BASE_URL || ScriptApp.getService().getUrl() || "";
-  const target = base ? base + "?id=" + encodeURIComponent(id) : id;
-  const qr = "https://quickchart.io/qr?text=" + encodeURIComponent(target) + "&size=180";
-  sheet.getRange(row,19).setFormula('=IMAGE("' + qr + '")');
-}
-
-function getDocument_(id) {
-  id = String(id || "").trim();
-  if (!id) return { result:"error", message:"Control Ref ID is required." };
-
-  const sheet = getMainSheet_();
-  const values = sheet.getDataRange().getValues();
-  for (let r=1;r<values.length;r++) {
-    if (String(values[r][1] || "").trim() === id) {
-      const v = values[r];
-      return {
-        result:"success",
-        document:{
-          controlRefId:v[1],
-          dateLogged:v[2],
-          time:v[3],
-          receivedBy:v[4],
-          originatingOffice:v[5],
-          subject:v[6],
-          actionRequired:v[7],
-          remarksStatus:v[8],
-          transmittedOffice:v[9],
-          dateReceived:v[10],
-          locationStatus:v[11],
-          driveLink:v[12],
-          currentSection:v[13],
-          currentPersonnel:v[14],
-          routingStatus:v[15],
-          forwardedDateTime:v[16],
-          sectionReceivedDateTime:v[17],
-          lastUpdated:v[19],
-          history:getMovementHistory_(id)
-        }
-      };
-    }
-  }
-  return { result:"error", message:"Document not found." };
-}
-
-function getPersonnel_(section) {
-  return PERSONNEL
-    .filter(r => r[1] === section && r[2] === "YES")
-    .map(r => r[0]);
-}
-
-function routeDocument_(id, movement, section, personnel, remarks) {
-  const sheet = getMainSheet_();
-  const values = sheet.getDataRange().getValues();
-  let row = -1;
-
-  for (let r=1;r<values.length;r++) {
-    if (String(values[r][1] || "").trim() === String(id || "").trim()) {
-      row = r + 1;
-      break;
-    }
-  }
-
-  if (row < 0) return { result:"error", message:"Document not found." };
-
-  const valid = PERSONNEL.some(r => r[0] === personnel && r[1] === section && r[2] === "YES");
-  if (movement !== "COMPLETE" && !valid) {
-    return { result:"error", message:"Personnel is not assigned to the selected section." };
-  }
-
-  const oldSection = String(sheet.getRange(row,14).getValue() || "");
-  const now = new Date();
-
-  if (movement === "FORWARD") {
-    sheet.getRange(row,14).setValue(section);
-    sheet.getRange(row,15).setValue(personnel);
-    sheet.getRange(row,16).setValue("Forwarded");
-    sheet.getRange(row,17).setValue(now);
-    sheet.getRange(row,20).setValue(now);
-    addMovement_(id,now,"FORWARDED",oldSection,section,personnel,remarks);
-  } else if (movement === "RECEIVE") {
-    sheet.getRange(row,14).setValue(section);
-    sheet.getRange(row,15).setValue(personnel);
-    sheet.getRange(row,16).setValue("Received by Section");
-    sheet.getRange(row,18).setValue(now);
-    sheet.getRange(row,20).setValue(now);
-    addMovement_(id,now,"RECEIVED",oldSection,section,personnel,remarks);
-  } else if (movement === "COMPLETE") {
-    sheet.getRange(row,16).setValue("Completed");
-    sheet.getRange(row,20).setValue(now);
-    addMovement_(id,now,"COMPLETED",oldSection,oldSection,personnel,remarks);
-  } else {
-    return { result:"error", message:"Invalid movement." };
-  }
-
-  return { result:"success", message:"Document movement recorded." };
-}
-
-function getMovementHistory_(id) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.MOVEMENT_SHEET);
-  if (!sheet || sheet.getLastRow() < 2) return [];
-  return sheet.getRange(2,1,sheet.getLastRow()-1,7).getValues()
-    .filter(r => String(r[0]) === String(id))
-    .map(r => ({
-      controlRefId:r[0], dateTime:r[1], action:r[2],
-      fromSection:r[3], toSection:r[4], personnel:r[5], remarks:r[6]
-    }))
-    .reverse();
-}
-
-function addMovement_(id, dateTime, action, fromSection, toSection, personnel, remarks) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.MOVEMENT_SHEET);
-  if (!sheet) return;
-  sheet.appendRow([id,dateTime,action,fromSection,toSection,personnel,remarks || ""]);
-}
-
-function getDashboard_() {
-  const sheet = getMainSheet_();
-  const values = sheet.getDataRange().getValues();
-  let total=0,messageCenter=0,forwarded=0,completed=0;
-  for (let r=1;r<values.length;r++) {
-    if (!values[r][1]) continue;
-    total++;
-    if (values[r][15] === "At Message Center") messageCenter++;
-    if (values[r][15] === "Forwarded") forwarded++;
-    if (values[r][15] === "Completed") completed++;
-  }
-  return { total, messageCenter, forwarded, completed };
-}
-
-function uploadFile_(fileData, filename, mimeType) {
-  const folder = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID);
-  const bytes = Utilities.base64Decode(fileData);
-  const blob = Utilities.newBlob(bytes, mimeType || "application/pdf", filename);
-  const file = folder.createFile(blob);
-  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-  return json_({
-    result:"success",
-    fileUrl:file.getUrl(),
-    fileId:file.getId()
-  });
-}
-
-function deleteMemos_(p) {
-  const sheet = getMainSheet_();
-  let ids = [];
-  if (p.id) ids.push(String(p.id).trim().toUpperCase());
-  if (p.ids) {
-    try {
-      const parsed = JSON.parse(p.ids);
-      if (Array.isArray(parsed)) ids = ids.concat(parsed.map(String));
-    } catch (_) {}
-  }
-  ids = ids.map(x => x.trim().toUpperCase()).filter(Boolean);
-  if (!ids.length) return json_({result:"error",error:"No memo ID specified for deletion"});
-
-  const values = sheet.getDataRange().getValues();
-  let deleted=0;
-  for (let r=values.length-1;r>=1;r--) {
-    const cell = String(values[r][1] || "").trim().toUpperCase();
-    const match = ids.some(target => cell === target || cell.indexOf(target+"-")===0 || target.indexOf(cell+"-")===0);
-    if (match) {
-      sheet.deleteRow(r+1);
-      deleted++;
-    }
-  }
-  return json_({result:"success",deletedCount:deleted});
-}
-
-function setupRCDSystem() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const main = getMainSheet_();
-
-  main.getRange(1,14,1,7).setValues([[
-    "Current Section","Current Personnel","Routing Status",
-    "Forwarded Date/Time","Section Received Date/Time",
-    "QR Code","Last Updated"
-  ]]);
-
-  const movement = ss.getSheetByName(CONFIG.MOVEMENT_SHEET) || ss.insertSheet(CONFIG.MOVEMENT_SHEET);
+  const movement = getOrCreateSheet_("MOVEMENT LOG");
   movement.clear();
-  movement.getRange(1,1,1,7).setValues([[
-    "Control Ref ID","Date/Time","Action","From Section","To Section","Personnel","Remarks"
+  movement.getRange(1,1,1,8).setValues([[
+    "Control Ref ID","Date/Time","Action","From Section","To Section",
+    "Personnel","Remarks","User"
   ]]);
+  movement.setFrozenRows(1);
 
-  const personnel = ss.getSheetByName(CONFIG.PERSONNEL_SHEET) || ss.insertSheet(CONFIG.PERSONNEL_SHEET);
+  const personnel = getOrCreateSheet_("PERSONNEL");
   personnel.clear();
   personnel.getRange(1,1,1,3).setValues([["Personnel","Section","Active"]]);
   personnel.getRange(2,1,PERSONNEL.length,3).setValues(PERSONNEL);
+  personnel.setFrozenRows(1);
 
-  const sections = ss.getSheetByName(CONFIG.SECTIONS_SHEET) || ss.insertSheet(CONFIG.SECTIONS_SHEET);
+  const sections = getOrCreateSheet_("SECTIONS");
   sections.clear();
   sections.getRange(1,1).setValue("Section");
   sections.getRange(2,1,SECTIONS.length,1).setValues(SECTIONS.map(x => [x]));
+  sections.setFrozenRows(1);
 
-  for (let c=1;c<=20;c++) main.autoResizeColumn(c);
-  [movement,personnel,sections].forEach(s => s.setFrozenRows(1));
+  const syncLog = getOrCreateSheet_("SYNC LOG");
+  syncLog.clear();
+  syncLog.getRange(1,1,1,4).setValues([[
+    "Date/Time","Action","Records Added","Records Updated"
+  ]]);
+  syncLog.setFrozenRows(1);
 
-  // Initialize existing records without changing A:M.
-  const lastRow = main.getLastRow();
-  if (lastRow > 1) {
-    for (let r=2;r<=lastRow;r++) {
-      const id = String(main.getRange(r,2).getValue() || "").trim();
-      if (!id) continue;
-      if (!main.getRange(r,14).getValue()) main.getRange(r,14).setValue("Message Center");
-      if (!main.getRange(r,15).getValue()) main.getRange(r,15).setValue(main.getRange(r,5).getValue());
-      if (!main.getRange(r,16).getValue()) main.getRange(r,16).setValue("At Message Center");
-      if (!main.getRange(r,19).getFormula()) setQrFormula_(main,r,id);
-      if (!main.getRange(r,20).getValue()) main.getRange(r,20).setValue(new Date());
+  const settings = getOrCreateSheet_("SETTINGS");
+  settings.clear();
+  settings.getRange(1,1,1,2).setValues([["Setting","Value"]]);
+  settings.getRange(2,1,4,2).setValues([
+    ["Source Spreadsheet ID",CONFIG.SOURCE_SPREADSHEET_ID],
+    ["Source Sheet",CONFIG.SOURCE_SHEET_NAME],
+    ["Routing Database Spreadsheet ID",ss.getId()],
+    ["Web App URL",CONFIG.WEB_APP_URL]
+  ]);
+  settings.setFrozenRows(1);
+
+  buildDashboard_();
+
+  [documents,movement,personnel,sections,syncLog,settings].forEach(s => {
+    if (s.getLastColumn()) {
+      s.getRange(1,1,1,s.getLastColumn()).setFontWeight("bold");
+      s.autoResizeColumns(1,s.getLastColumn());
     }
+  });
+
+  SpreadsheetApp.getUi().alert("Database setup completed.");
+}
+
+/**************** FAST SYNC ****************/
+
+function syncDocuments() {
+  syncDocuments_(true);
+}
+
+function syncDocuments_(showAlert) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) {
+    if (showAlert) SpreadsheetApp.getUi().alert("Another sync is already running. Please wait.");
+    return;
+  }
+
+  try {
+    const sourceSS = SpreadsheetApp.openById(CONFIG.SOURCE_SPREADSHEET_ID);
+    const source = sourceSS.getSheetByName(CONFIG.SOURCE_SHEET_NAME) || sourceSS.getSheets()[0];
+    const sourceData = source.getDataRange().getValues();
+
+    if (sourceData.length < 2) {
+      if (showAlert) SpreadsheetApp.getUi().alert("No memo records found.");
+      return;
+    }
+
+    const target = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.DOCUMENTS);
+    if (!target) throw new Error("Run setupDatabase() first.");
+
+    const lastTargetRow = target.getLastRow();
+    const oldData = lastTargetRow > 1
+      ? target.getRange(2,1,lastTargetRow-1,20).getValues()
+      : [];
+
+    const oldById = {};
+    oldData.forEach((r,i) => {
+      const id = String(r[0] || "").trim();
+      if (id) oldById[id] = r;
+    });
+
+    const output = [];
+    const qrFormulas = [];
+    let added = 0;
+    let updated = 0;
+
+    for (let r = 1; r < sourceData.length; r++) {
+      const row = sourceData[r];
+      const id = String(row[1] || "").trim();
+      if (!id) continue;
+
+      const old = oldById[id];
+
+      const currentSection = old ? (old[13] || "Message Center") : "Message Center";
+      const currentPersonnel = old ? (old[14] || row[4] || "") : (row[4] || "");
+      const routingStatus = old ? (old[15] || "At Message Center") : "At Message Center";
+      const forwarded = old ? (old[16] || "") : "";
+      const received = old ? (old[17] || "") : "";
+      const lastUpdated = old ? (old[19] || new Date()) : new Date();
+
+      output.push([
+        id, r+1, row[2], row[3], row[4], row[5], row[6], row[7],
+        row[8], row[9], row[10], row[11], row[12],
+        currentSection, currentPersonnel, routingStatus,
+        forwarded, received, "", lastUpdated
+      ]);
+
+      qrFormulas.push([qrFormula_(id)]);
+
+      if (old) updated++;
+      else added++;
+    }
+
+    /*
+     * One bulk write instead of hundreds of setValue calls.
+     */
+    if (output.length) {
+      target.getRange(2,1,output.length,20).setValues(output);
+      target.getRange(2,19,qrFormulas.length,1).setFormulas(qrFormulas);
+    }
+
+    /*
+     * Remove old rows if the source has fewer records than before.
+     */
+    const neededLastRow = output.length + 1;
+    if (target.getLastRow() > neededLastRow) {
+      target.deleteRows(neededLastRow + 1, target.getLastRow() - neededLastRow);
+    }
+
+    const log = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SYNC_LOG);
+    if (log) log.appendRow([new Date(),"SYNC",added,updated]);
+
+    buildDashboard_();
+
+    if (showAlert) {
+      SpreadsheetApp.getUi().alert(
+        "Synchronization completed.\n\n" +
+        "Records found: " + output.length +
+        "\nNew records: " + added +
+        "\nUpdated records: " + updated
+      );
+    }
+
+  } finally {
+    lock.releaseLock();
   }
 }
 
-function testDriveAccess() {
-  const folder = DriveApp.getFolderById(CONFIG.DRIVE_FOLDER_ID);
-  Logger.log(folder.getName());
+function qrFormula_(id) {
+  const target = CONFIG.WEB_APP_URL + "?id=" + encodeURIComponent(id);
+  const qr = "https://quickchart.io/qr?text=" + encodeURIComponent(target) + "&size=180";
+  return '=IMAGE("' + qr + '")';
+}
+
+function generateQRCodes() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.DOCUMENTS);
+  if (!sheet) throw new Error("Run setupDatabase() first.");
+
+  const n = sheet.getLastRow() - 1;
+  if (n <= 0) return;
+
+  const ids = sheet.getRange(2,1,n,1).getValues();
+  const formulas = ids.map(r => [r[0] ? qrFormula_(String(r[0])) : ""]);
+  sheet.getRange(2,19,n,1).setFormulas(formulas);
+
+  SpreadsheetApp.getUi().alert("QR codes updated.");
+}
+
+/**************** WEBSITE DATA ****************/
+
+function getDocument_(id) {
+  id = String(id || "").trim();
+  if (!id) return {result:"error", message:"Control Ref ID is required."};
+
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.DOCUMENTS);
+  if (!sheet || sheet.getLastRow() < 2) {
+    return {result:"error", message:"No documents are available."};
+  }
+
+  const values = sheet.getRange(2,1,sheet.getLastRow()-1,20).getValues();
+  const found = values.find(r => String(r[0] || "").trim() === id);
+
+  if (!found) return {result:"error", message:"Document not found: " + id};
+
+  return {
+    result:"success",
+    document:{
+      controlRefId:found[0],
+      sourceRow:found[1],
+      dateLogged:found[2],
+      time:found[3],
+      receivedBy:found[4],
+      originatingOffice:found[5],
+      subject:found[6],
+      actionRequired:found[7],
+      remarksStatus:found[8],
+      transmittedOffice:found[9],
+      dateReceived:found[10],
+      locationStatus:found[11],
+      driveLink:found[12],
+      currentSection:found[13],
+      currentPersonnel:found[14],
+      routingStatus:found[15],
+      forwardedDateTime:found[16],
+      sectionReceivedDateTime:found[17],
+      lastUpdated:found[19],
+      history:getMovementHistory_(id)
+    }
+  };
+}
+
+function getMetrics_() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.DOCUMENTS);
+  if (!sheet || sheet.getLastRow() < 2) {
+    return {total:0,messageCenter:0,forwarded:0,completed:0};
+  }
+
+  const rows = sheet.getRange(2,14,sheet.getLastRow()-1,3).getValues();
+  let messageCenter=0, forwarded=0, completed=0;
+
+  rows.forEach(r => {
+    const status = String(r[2] || "");
+    if (status === "At Message Center") messageCenter++;
+    if (status === "Forwarded") forwarded++;
+    if (status === "Completed") completed++;
+  });
+
+  return {
+    total: rows.length,
+    messageCenter,
+    forwarded,
+    completed
+  };
+}
+
+/**************** ROUTING ****************/
+
+function routeDocument_(id,movement,section,personnel,remarks) {
+  id = String(id || "").trim();
+  movement = String(movement || "").trim().toUpperCase();
+
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.DOCUMENTS);
+  if (!sheet || sheet.getLastRow() < 2) return {result:"error",message:"No documents available."};
+
+  const values = sheet.getRange(2,1,sheet.getLastRow()-1,20).getValues();
+  const index = values.findIndex(r => String(r[0] || "").trim() === id);
+
+  if (index < 0) return {result:"error",message:"Document not found."};
+
+  const rowNumber = index + 2;
+  const row = values[index];
+  const oldSection = String(row[13] || "");
+
+  if (movement !== "COMPLETE") {
+    const valid = PERSONNEL.some(p => p[0] === personnel && p[1] === section && p[2] === "YES");
+    if (!valid) return {result:"error",message:"Personnel is not assigned to the selected section."};
+  }
+
+  const now = new Date();
+
+  if (movement === "FORWARD") {
+    sheet.getRange(rowNumber,14,1,4).setValues([[
+      section, personnel, "Forwarded", now
+    ]]);
+    sheet.getRange(rowNumber,20).setValue(now);
+
+  } else if (movement === "RECEIVE") {
+    sheet.getRange(rowNumber,14,1,5).setValues([[
+      section, personnel, "Received by Section", row[16] || "", now
+    ]]);
+    sheet.getRange(rowNumber,20).setValue(now);
+
+  } else if (movement === "COMPLETE") {
+    sheet.getRange(rowNumber,16).setValue("Completed");
+    sheet.getRange(rowNumber,20).setValue(now);
+
+  } else {
+    return {result:"error",message:"Invalid movement."};
+  }
+
+  addMovement_(id,now,movement,oldSection,section,personnel,remarks || "");
+
+  return {result:"success",message:"Document movement recorded."};
+}
+
+function addMovement_(id,dateTime,action,fromSection,toSection,personnel,remarks) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.MOVEMENT);
+  if (!sheet) return;
+
+  sheet.appendRow([
+    id,dateTime,action,fromSection,toSection,personnel,
+    remarks || "",
+    Session.getActiveUser().getEmail() || ""
+  ]);
+}
+
+function getMovementHistory_(id) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.MOVEMENT);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+
+  const values = sheet.getRange(2,1,sheet.getLastRow()-1,8).getValues();
+
+  return values
+    .filter(r => String(r[0] || "") === String(id))
+    .reverse()
+    .map(r => ({
+      controlRefId:r[0],
+      dateTime:r[1],
+      action:r[2],
+      fromSection:r[3],
+      toSection:r[4],
+      personnel:r[5],
+      remarks:r[6]
+    }));
+}
+
+/**************** DASHBOARD / TRIGGER ****************/
+
+function buildDashboard_() {
+  const sheet = getOrCreateSheet_("DASHBOARD");
+  sheet.clear();
+
+  sheet.getRange("A1").setValue("PRO4A RCD DOCUMENT ROUTING DASHBOARD");
+  sheet.getRange("A1").setFontWeight("bold").setFontSize(16);
+
+  sheet.getRange("A3:B9").setValues([
+    ["Metric","Count"],
+    ["Total Documents",""],
+    ["At Message Center",""],
+    ["Forwarded",""],
+    ["Received by Section",""],
+    ["Completed",""],
+    ["Pending",""]
+  ]);
+
+  sheet.getRange("B4").setFormula("=COUNTA(DOCUMENTS!A2:A)");
+  sheet.getRange("B5").setFormula('=COUNTIF(DOCUMENTS!P2:P,"At Message Center")');
+  sheet.getRange("B6").setFormula('=COUNTIF(DOCUMENTS!P2:P,"Forwarded")');
+  sheet.getRange("B7").setFormula('=COUNTIF(DOCUMENTS!P2:P,"Received by Section")');
+  sheet.getRange("B8").setFormula('=COUNTIF(DOCUMENTS!P2:P,"Completed")');
+  sheet.getRange("B9").setFormula("=B5+B6");
+
+  sheet.getRange("A3:B3").setFontWeight("bold");
+}
+
+function installAutomaticSync() {
+  ScriptApp.getProjectTriggers().forEach(t => {
+    if (t.getHandlerFunction() === "syncDocumentsAutomatic_") {
+      ScriptApp.deleteTrigger(t);
+    }
+  });
+
+  ScriptApp.newTrigger("syncDocumentsAutomatic_")
+    .timeBased()
+    .everyMinutes(15)
+    .create();
+
+  SpreadsheetApp.getUi().alert("Automatic sync installed.");
+}
+
+function syncDocumentsAutomatic_() {
+  syncDocuments_(false);
+}
+
+/**************** HELPERS ****************/
+
+function getOrCreateSheet_(name) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  return ss.getSheetByName(name) || ss.insertSheet(name);
 }
