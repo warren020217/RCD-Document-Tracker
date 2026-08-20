@@ -16,7 +16,6 @@
 <script src="config.js"></script>
 </head>
 <body>
-
 <header class="top">
   <div class="brandLogo">
     <img src="assets/pro4a-logo.png" alt="PRO4A Regional Comptrollership Division">
@@ -29,24 +28,20 @@
 </header>
 
 <nav id="nav">
-  <button data-page="home" class="active">Home</button>
+  <button data-page="home">Home</button>
   <button data-page="track">Track</button>
   <button data-page="scan">Scan QR</button>
   <button data-page="route">Route</button>
 </nav>
 
 <main>
-
 <section id="home" class="page active">
   <div class="hero">
     <img class="heroLogo" src="assets/pro4a-logo.png" alt="PRO4A Regional Comptrollership Division">
     <div>
       <div class="eyebrow">REGIONAL COMPTROLLERSHIP DIVISION</div>
       <h1>Document Routing System</h1>
-      <p class="muted">
-        Track a document using either the Control Ref ID or Subject / Title of Memo,
-        then forward it to the concern personnel.
-      </p>
+      <p class="muted">Track where a document is and who currently has custody of it.</p>
     </div>
   </div>
 
@@ -57,45 +52,28 @@
     <div><span>Completed</span><strong id="completed">-</strong></div>
   </div>
 
-  <div class="box searchBox">
+  <div class="box">
     <h2>Find a Document</h2>
-    <p class="muted">
-      Enter a Control Ref ID or Subject / Title of Memo.
-    </p>
-    <input id="homeQuery"
-           placeholder="Control Ref ID / Subject / Title of Memo"
-           autocomplete="off">
-    <button class="mainBtn" id="homeTrack" type="button">Track Document</button>
+    <input id="homeId" placeholder="Enter Control Ref ID" autocomplete="off">
+    <button class="mainBtn" id="homeTrack">Track Document</button>
   </div>
 
-  <div id="homeResult"></div>
-
-  <div id="connectionStatus" class="connection pending">
-    Connecting to PRO4A RCD Routing API...
-  </div>
+  <div id="connectionStatus" class="connection pending">Connecting to PRO4A RCD Routing API...</div>
 </section>
 
 <section id="track" class="page">
   <h1>Track Document</h1>
-  <p class="muted">
-    Enter either the Control Ref ID or Subject / Title of Memo.
-  </p>
-
-  <div class="box searchBox">
-    <input id="trackQuery"
-           placeholder="Control Ref ID / Subject / Title of Memo"
-           autocomplete="off">
-    <button class="mainBtn" id="trackBtn" type="button">Track Document</button>
+  <p class="muted">Enter the Control Ref ID or open this page from a document QR code.</p>
+  <div class="box">
+    <input id="trackId" placeholder="Example: MEMO-2026-1222" autocomplete="off">
+    <button class="mainBtn" id="trackBtn">Search</button>
   </div>
-
   <div id="result"></div>
 </section>
 
 <section id="scan" class="page">
   <h1>Scan QR Code</h1>
-  <p class="muted">
-    Allow camera access, then point the camera at the document QR code.
-  </p>
+  <p class="muted">Allow camera access, then point the camera at the document QR code.</p>
   <div class="box center">
     <div id="reader"></div>
     <p id="scanStatus" class="muted">Starting camera...</p>
@@ -104,21 +82,13 @@
 
 <section id="route" class="page">
   <h1>Route / Receive</h1>
-  <p class="muted">
-    Load a document by Control Ref ID or Subject / Title of Memo,
-    then record the movement.
-  </p>
-
-  <div class="box searchBox">
-    <input id="routeQuery"
-           placeholder="Control Ref ID / Subject / Title of Memo"
-           autocomplete="off">
-    <button class="mainBtn" id="routeLoad" type="button">Load Document</button>
+  <p class="muted">Load a document, select the destination section and personnel, then record the movement.</p>
+  <div class="box">
+    <input id="routeId" placeholder="Control Ref ID" autocomplete="off">
+    <button class="mainBtn" id="routeLoad">Load Document</button>
   </div>
-
   <div id="routeResult"></div>
 </section>
-
 </main>
 
 <div id="toast" role="status" aria-live="polite"></div>

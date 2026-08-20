@@ -1,486 +1,232 @@
-let API_URL = (window.RCD_CONFIG || {}).API_URL ||
-  localStorage.getItem("RCD_API_URL") || "";
+let API_URL=(window.RCD_CONFIG||{}).API_URL||localStorage.getItem("RCD_API_URL")||"";
+let current=null,scanner=null,jsonpCounter=0;
 
-let current = null;
-let scanner = null;
+const $=id=>document.getElementById(id);
+const esc=v=>String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
 
-const $ = id => document.getElementById(id);
+function api(params={}, timeoutMs=20000) {
+  return new Promise(async (resolve, reject) => {
+    if (!API_URL) return reject(new Error("RCD API URL is missing."));
 
-const esc = value => String(value ?? "")
-  .replace(/&/g, "&amp;")
-  .replace(/</g, "&lt;")
-  .replace(/>/g, "&gt;")
-  .replace(/"/g, "&quot;")
-  .replace(/'/g, "&#039;");
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-async function api(params = {}, timeoutMs = 20000) {
-  if (!API_URL) throw new Error("RCD API URL is missing.");
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const url = new URL(API_URL, window.location.origin);
-
-    Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined && value !== null && value !== "") {
-        url.searchParams.set(key, String(value));
-      }
-    });
-
-    const response = await fetch(url.toString(), {
-      method: "GET",
-      headers: { Accept: "application/json" },
-      cache: "no-store",
-      signal: controller.signal
-    });
-
-    const text = await response.text();
-
-    if (!response.ok) {
-      throw new Error(`RCD API HTTP ${response.status}`);
-    }
-
-    let data;
     try {
-      data = JSON.parse(text);
-    } catch (_) {
-      throw new Error("RCD API returned invalid JSON.");
+      const u = new URL(API_URL, window.location.origin);
+      Object.entries(params).forEach(([k,v]) => {
+        if (v !== undefined && v !== null) u.searchParams.set(k, String(v));
+      });
+
+      const response = await fetch(u.toString(), {
+        method: "GET",
+        headers: { "Accept": "application/json" },
+        cache: "no-store",
+        signal: controller.signal
+      });
+
+      const text = await response.text();
+
+      if (!response.ok) {
+        throw new Error(`RCD API HTTP ${response.status}`);
+      }
+
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (_) {
+        throw new Error("RCD API returned invalid JSON.");
+      }
+
+      if (data?.result === "error") {
+        throw new Error(data.error || data.message || "RCD API returned an error.");
+      }
+
+      resolve(data);
+    } catch (e) {
+      if (e.name === "AbortError") {
+        reject(new Error("RCD API timed out. Please try again."));
+      } else {
+        reject(e);
+      }
+    } finally {
+      clearTimeout(timer);
     }
-
-    if (data?.result === "error") {
-      throw new Error(data.error || data.message || "RCD API returned an error.");
-    }
-
-    return data;
-  } catch (error) {
-    if (error.name === "AbortError") {
-      throw new Error("RCD API timed out. Please try again.");
-    }
-    throw error;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function apiAction(action, params = {}) {
-  return api({ ...params, action });
-}
-
-function page(id) {
-  document.querySelectorAll(".page").forEach(x => x.classList.remove("active"));
-  const target = $(id);
-  if (target) target.classList.add("active");
-
-  document.querySelectorAll("nav button").forEach(x => {
-    x.classList.toggle("active", x.dataset.page === id);
   });
+}
 
+async function apiAction(action, params={}) {
+  return api(Object.assign({},params,{action}));
+}
+
+function page(id){
+  document.querySelectorAll(".page").forEach(x=>x.classList.remove("active"));
+  $(id).classList.add("active");
+  document.querySelectorAll("nav button").forEach(x=>x.classList.toggle("active",x.dataset.page===id));
   document.querySelector("nav")?.classList.remove("open");
-
-  if (id === "scan") startScan();
+  if(id==="scan")startScan();
 }
 
-function toast(message) {
-  const el = $("toast");
-  if (!el) return;
-  el.textContent = message;
-  el.style.display = "block";
+function toast(m){
+  $("toast").textContent=m;
+  $("toast").style.display="block";
   clearTimeout(window.__toastTimer);
-  window.__toastTimer = setTimeout(() => {
-    el.style.display = "none";
-  }, 3500);
+  window.__toastTimer=setTimeout(()=>$("toast").style.display="none",3500);
 }
 
-function showDoc(data, target, actions = true) {
-  if (!data) {
-    target.innerHTML = `<div class="error">Document not found.</div>`;
+function showDoc(data,target,actions=false){
+  if(!data||data.result==="error"){
+    target.innerHTML=`<div class="error">${esc(data?.message||data?.error||"Document not found.")}</div>`;
     return;
   }
+  let d=data.document||data;
+  current=d;
+  let hist=(d.history||[]).map(x=>`<div class="move"><b>${esc(x.action)}</b><br>${esc(x.fromSection||"Initial")} → ${esc(x.toSection||"")}<small>${esc(x.personnel||"")} · ${esc(x.dateTime||"")}</small>${x.remarks?`<small>${esc(x.remarks)}</small>`:""}</div>`).join("")||'<p class="muted">No movement history.</p>';
 
-  if (data.result === "error") {
-    target.innerHTML = `<div class="error">${esc(data.message || data.error || "Document not found.")}</div>`;
-    return;
-  }
-
-  if (Array.isArray(data.documents)) {
-    showDocumentList(data.documents, target);
-    return;
-  }
-
-  const d = data.document || data;
-  current = d;
-
-  const history = (d.history || []).map(x => `
-    <div class="move">
-      <b>${esc(x.action || "")}</b><br>
-      ${esc(x.fromSection || "Initial")} → ${esc(x.toSection || "")}
-      <small>${esc(x.personnel || "")} · ${esc(x.dateTime || "")}</small>
-      ${x.remarks ? `<small>${esc(x.remarks)}</small>` : ""}
+  target.innerHTML=`<div class="doc">
+    <div class="docHead"><div class="docId">${esc(d.controlRefId)}</div><span class="status">${esc(d.routingStatus||d.locationStatus||"Unassigned")}</span></div>
+    <div class="fields">
+      <div class="field"><label>Current Section</label><b>${esc(d.currentSection||"Not assigned")}</b></div>
+      <div class="field"><label>Current Personnel</label><b>${esc(d.currentPersonnel||"Not assigned")}</b></div>
+      <div class="field"><label>Originating Office</label><b>${esc(d.originatingOffice)}</b></div>
+      <div class="field"><label>Received By</label><b>${esc(d.receivedBy)}</b></div>
+      <div class="field wide"><label>Subject</label><b>${esc(d.subject)}</b></div>
+      <div class="field"><label>Date Logged</label><b>${esc(d.dateLogged)}</b></div>
+      <div class="field"><label>Action Required</label><b>${esc(d.actionRequired)}</b></div>
+      <div class="field"><label>Date Received</label><b>${esc(d.dateReceived)}</b></div>
     </div>
-  `).join("") || `<p class="muted">No movement history.</p>`;
-
-  target.innerHTML = `
-    <div class="doc">
-      <div class="docHead">
-        <div class="docId">${esc(d.controlRefId)}</div>
-        <span class="status">${esc(d.routingStatus || d.locationStatus || "Unassigned")}</span>
-      </div>
-
-      <div class="fields">
-        <div class="field wide">
-          <label>Subject / Title of Memo</label>
-          <b>${esc(d.subject || "N/A")}</b>
-        </div>
-
-        <div class="field">
-          <label>Current Section</label>
-          <b>${esc(d.currentSection || "Not assigned")}</b>
-        </div>
-
-        <div class="field">
-          <label>Current Personnel</label>
-          <b>${esc(d.currentPersonnel || "Not assigned")}</b>
-        </div>
-
-        <div class="field">
-          <label>Originating Office</label>
-          <b>${esc(d.originatingOffice || "N/A")}</b>
-        </div>
-
-        <div class="field">
-          <label>Received By</label>
-          <b>${esc(d.receivedBy || "N/A")}</b>
-        </div>
-
-        <div class="field">
-          <label>Date Logged</label>
-          <b>${esc(d.dateLogged || "N/A")}</b>
-        </div>
-
-        <div class="field">
-          <label>Action Required</label>
-          <b>${esc(d.actionRequired || "N/A")}</b>
-        </div>
-
-        <div class="field">
-          <label>Date Received</label>
-          <b>${esc(d.dateReceived || "N/A")}</b>
-        </div>
-
-        <div class="field">
-          <label>Location Status</label>
-          <b>${esc(d.locationStatus || "N/A")}</b>
-        </div>
-
-        <div class="field">
-          <label>Routing Status</label>
-          <b>${esc(d.routingStatus || "N/A")}</b>
-        </div>
-      </div>
-
-      ${d.driveLink ? `
-        <div class="docLink">
-          <a href="${esc(d.driveLink)}" target="_blank" rel="noopener">
-            Open Google Drive File
-          </a>
-        </div>
-      ` : ""}
-
-      <div class="history">
-        <h2>Movement History</h2>
-        ${history}
-      </div>
-
-      ${actions ? routingPanel() : ""}
-    </div>
-  `;
-
-  if (actions) loadSections();
+    ${d.driveLink?`<div class="docLink"><a href="${esc(d.driveLink)}" target="_blank" rel="noopener">Open Google Drive File</a></div>`:""}
+    <div class="history"><h2>Movement History</h2>${hist}</div>
+    ${actions?`<div class="actions">
+      <div class="two"><select id="sec"><option value="">Select Section</option></select><select id="person"><option value="">Select Personnel</option></select></div>
+      <textarea id="remarks" rows="2" placeholder="Remarks (optional)"></textarea>
+      <div class="two"><button class="actionBtn green" id="receive">Receive</button><button class="actionBtn" id="forward">Forward</button></div>
+      <button class="actionBtn orange" id="complete">Mark Completed</button>
+    </div>`:""}
+  </div>`;
+  if(actions)loadSections();
 }
 
-function showDocumentList(documents, target) {
-  if (!documents.length) {
-    target.innerHTML = `<div class="error">No matching documents found.</div>`;
-    return;
-  }
-
-  target.innerHTML = `
-    <div class="box">
-      <h2>Matching Documents</h2>
-      <p class="muted">${documents.length} matching document(s) found.</p>
-
-      <div class="searchResults">
-        ${documents.map((d, index) => `
-          <div class="searchResult">
-            <div class="searchResultInfo">
-              <strong>${esc(d.controlRefId)}</strong>
-              <div class="resultSubject">${esc(d.subject || "No subject")}</div>
-              <small>
-                ${esc(d.currentSection || "Unassigned")} ·
-                ${esc(d.currentPersonnel || "Unassigned")}
-              </small>
-            </div>
-            <button class="resultBtn" data-result-index="${index}">
-              Open &amp; Route
-            </button>
-          </div>
-        `).join("")}
-      </div>
-    </div>
-  `;
-
-  target.querySelectorAll("[data-result-index]").forEach(button => {
-    button.onclick = () => {
-      const index = Number(button.dataset.resultIndex);
-      showDoc({
-        result: "success",
-        document: documents[index]
-      }, target, true);
-    };
-  });
+async function find(id,target,actions=false){
+  id=(id||"").trim();
+  if(!id)return toast("Enter the Control Ref ID.");
+  target.innerHTML='<div class="box loading">Loading document...</div>';
+  try{showDoc(await api({action:"getDocument",id}),target,actions)}
+  catch(e){target.innerHTML=`<div class="error">${esc(e.message)}</div>`}
 }
 
-function routingPanel() {
-  return `
-    <div class="actions">
-      <h2>Forward Document</h2>
-      <p class="muted">
-        Select the concern section and personnel who will receive this document.
-      </p>
-
-      <label class="routeLabel">Concern Section</label>
-      <select id="sec">
-        <option value="">Select Concern Section</option>
-      </select>
-
-      <label class="routeLabel">Concern Personnel</label>
-      <select id="person">
-        <option value="">Select Concern Personnel</option>
-      </select>
-
-      <textarea id="remarks" rows="3"
-        placeholder="Routing remarks / instructions (optional)"></textarea>
-
-      <button class="actionBtn" id="forward">
-        Forward to Concern Personnel
-      </button>
-
-      <div class="two routeSecondary">
-        <button class="actionBtn green" id="receive">Receive</button>
-        <button class="actionBtn orange" id="complete">Mark Completed</button>
-      </div>
-    </div>
-  `;
+async function loadSections(){
+  try{
+    let d=await api({action:"getSections"});
+    let s=$("sec");
+    d.sections.forEach(x=>{
+      let o=document.createElement("option");
+      o.value=x;o.textContent=x;s.appendChild(o);
+    });
+    s.onchange=loadPeople;
+  }catch(e){toast(e.message)}
 }
 
-async function findDocument(query, target, actions = true) {
-  query = (query || "").trim();
-
-  if (!query) {
-    toast("Enter the Control Ref ID or Subject / Title of Memo.");
-    return;
-  }
-
-  target.innerHTML = `<div class="box loading">Searching document...</div>`;
-
-  try {
-    const data = await apiAction("getDocument", { query });
-    showDoc(data, target, actions);
-  } catch (error) {
-    target.innerHTML = `<div class="error">${esc(error.message)}</div>`;
-  }
+async function loadPeople(){
+  let s=$("sec"),p=$("person");
+  p.innerHTML='<option value="">Select Personnel</option>';
+  if(!s.value)return;
+  try{
+    let d=await api({action:"getPersonnel",section:s.value});
+    d.personnel.forEach(x=>{
+      let o=document.createElement("option");
+      o.value=x;o.textContent=x;p.appendChild(o);
+    });
+  }catch(e){toast(e.message)}
 }
 
-async function loadSections() {
-  try {
-    const data = await apiAction("getSections");
-    const select = $("sec");
-    if (!select) return;
+async function move(type){
+  let id=current?.controlRefId,s=$("sec")?.value||"",p=$("person")?.value||"",r=$("remarks")?.value||"";
+  if(!id)return toast("Load a document first.");
 
-    select.innerHTML = `<option value="">Select Concern Section</option>`;
+  if(type!=="COMPLETE"&&(!s||!p))return toast("Select the section and personnel.");
 
-    (data.sections || []).forEach(section => {
-      const option = document.createElement("option");
-      option.value = section;
-      option.textContent = section;
-      select.appendChild(option);
+  try{
+    // Confirmed Apps Script deployment exposes routeDocument.
+    // Keep all movement operations on this stable API contract.
+    const d = await apiAction("routeDocument",{
+      id:id,
+      movement:type,
+      section:s,
+      personnel:p,
+      remarks:r
     });
 
-    select.onchange = loadPeople;
-  } catch (error) {
-    toast(error.message);
-  }
-}
-
-async function loadPeople() {
-  const section = $("sec");
-  const personnel = $("person");
-  if (!section || !personnel) return;
-
-  personnel.innerHTML = `<option value="">Select Concern Personnel</option>`;
-  if (!section.value) return;
-
-  try {
-    const data = await apiAction("getPersonnel", { section: section.value });
-
-    (data.personnel || []).forEach(name => {
-      const option = document.createElement("option");
-      option.value = name;
-      option.textContent = name;
-      personnel.appendChild(option);
-    });
-  } catch (error) {
-    toast(error.message);
-  }
-}
-
-async function move(type) {
-  const id = current?.controlRefId;
-  const section = $("sec")?.value || "";
-  const personnel = $("person")?.value || "";
-  const remarks = $("remarks")?.value || "";
-
-  if (!id) return toast("Load a document first.");
-
-  if (type !== "COMPLETE" && (!section || !personnel)) {
-    return toast("Select the concern section and personnel.");
-  }
-
-  try {
-    const data = await apiAction("routeDocument", {
-      id,
-      movement: type,
-      section,
-      personnel,
-      remarks
-    });
-
-    if (data?.result === "error") {
-      throw new Error(data.error || data.message || "Movement was not recorded.");
-    }
-
-    toast(data.message || "Document movement recorded.");
-
-    const resultTarget = $("routeResult") || $("result") || $("homeResult");
-    await findDocument(id, resultTarget, true);
+    if(d?.result==="error") throw new Error(d.error||d.message||"Movement was not recorded.");
+    toast(d.message||"Document movement recorded.");
+    find(id,$("routeResult"),true);
     dashboard();
-  } catch (error) {
-    toast(error.message);
+  }catch(e){toast(e.message)}
+}
+
+async function startScan(){
+  if(scanner||!window.Html5Qrcode)return setTimeout(startScan,500);
+  scanner=new Html5Qrcode("reader");
+  try{
+    await scanner.start({facingMode:"environment"},{fps:10,qrbox:{width:240,height:240}},async text=>{
+      try{await scanner.stop();}catch(_){}
+      try{scanner.clear();}catch(_){}
+      scanner=null;
+      let id=text;
+      try{id=new URL(text).searchParams.get("id")||text}catch{}
+      page("track");$("trackId").value=id;find(id,$("result"));
+    },()=>{});
+    $("scanStatus").textContent="Point the camera at the QR code.";
+  }catch(e){
+    $("scanStatus").textContent="Camera access is unavailable. Enter the Control Ref ID manually.";
   }
 }
 
-async function startScan() {
-  if (scanner || !window.Html5Qrcode) {
-    if (!scanner) setTimeout(startScan, 500);
-    return;
-  }
-
-  const reader = $("reader");
-  if (!reader) return;
-
-  scanner = new Html5Qrcode("reader");
-
-  try {
-    await scanner.start(
-      { facingMode: "environment" },
-      { fps: 10, qrbox: { width: 240, height: 240 } },
-      async text => {
-        try { await scanner.stop(); } catch (_) {}
-        try { scanner.clear(); } catch (_) {}
-        scanner = null;
-
-        let query = text;
-        try {
-          query = new URL(text).searchParams.get("id") || text;
-        } catch (_) {}
-
-        page("track");
-        $("trackQuery").value = query;
-        findDocument(query, $("result"), true);
-      },
-      () => {}
-    );
-
-    $("scanStatus").textContent = "Point the camera at the QR code.";
-  } catch (_) {
-    $("scanStatus").textContent =
-      "Camera access is unavailable. Enter the Control Ref ID manually.";
+async function dashboard(){
+  try{
+    const d=await apiAction("dashboard");
+    const m=d.metrics||{};
+    $("total").textContent=Number(m.total??0).toLocaleString();
+    $("message").textContent=Number(m.messageCenter??0).toLocaleString();
+    $("forwarded").textContent=Number(m.forwarded??0).toLocaleString();
+    $("completed").textContent=Number(m.completed??0).toLocaleString();
+    $("connectionStatus").textContent="Connected to RCD routing database";
+    $("connectionStatus").className="connection ok";
+  }catch(e){
+    $("total").textContent="-";
+    $("message").textContent="-";
+    $("forwarded").textContent="-";
+    $("completed").textContent="-";
+    $("connectionStatus").textContent="RCD API unavailable: "+e.message;
+    $("connectionStatus").className="connection errorConn";
+    console.error("Dashboard API error:",e);
   }
 }
 
-async function dashboard() {
-  try {
-    const data = await apiAction("dashboard");
-    const m = data.metrics || {};
-
-    $("total").textContent = Number(m.total ?? 0).toLocaleString();
-    $("message").textContent = Number(m.messageCenter ?? 0).toLocaleString();
-    $("forwarded").textContent = Number(m.forwarded ?? 0).toLocaleString();
-    $("completed").textContent = Number(m.completed ?? 0).toLocaleString();
-
-    $("connectionStatus").textContent = "Connected to RCD routing database";
-    $("connectionStatus").className = "connection ok";
-  } catch (error) {
-    $("total").textContent = "-";
-    $("message").textContent = "-";
-    $("forwarded").textContent = "-";
-    $("completed").textContent = "-";
-
-    $("connectionStatus").textContent =
-      "RCD API unavailable: " + error.message;
-    $("connectionStatus").className = "connection errorConn";
-
-    console.error("Dashboard API error:", error);
-  }
-}
-
-document.querySelectorAll("nav button").forEach(button => {
-  button.onclick = () => page(button.dataset.page);
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>page(b.dataset.page));
+$("menu").onclick=()=>document.querySelector("nav").classList.toggle("open");
+$("homeTrack").onclick=()=>{page("track");$("trackId").value=$("homeId").value;find($("homeId").value,$("result"))};
+$("trackBtn").onclick=()=>find($("trackId").value,$("result"));
+$("routeLoad").onclick=()=>find($("routeId").value,$("routeResult"),true);
+document.addEventListener("click",e=>{
+  if(e.target.id==="receive")move("RECEIVE");
+  if(e.target.id==="forward")move("FORWARD");
+  if(e.target.id==="complete")move("COMPLETE");
 });
 
-$("menu").onclick = () => {
-  document.querySelector("nav").classList.toggle("open");
-};
-
-$("homeTrack").onclick = () => {
-  const query = $("homeQuery").value;
-  page("track");
-  $("trackQuery").value = query;
-  findDocument(query, $("result"), true);
-};
-
-$("trackBtn").onclick = () => {
-  findDocument($("trackQuery").value, $("result"), true);
-};
-
-$("routeLoad").onclick = () => {
-  findDocument($("routeQuery").value, $("routeResult"), true);
-};
-
-document.addEventListener("click", event => {
-  if (event.target.id === "receive") move("RECEIVE");
-  if (event.target.id === "forward") move("FORWARD");
-  if (event.target.id === "complete") move("COMPLETE");
-});
-
-document.addEventListener("keydown", event => {
-  if (event.key !== "Enter") return;
-
-  if (document.activeElement === $("homeQuery")) $("homeTrack").click();
-  if (document.activeElement === $("trackQuery")) $("trackBtn").click();
-  if (document.activeElement === $("routeQuery")) $("routeLoad").click();
-});
-
-window.addEventListener("load", () => {
-  const params = new URLSearchParams(location.search);
-  const id = params.get("id");
-
-  if (id) {
+window.addEventListener("load",()=>{
+  const id=new URLSearchParams(location.search).get("id");
+  if(id){
     page("track");
-    $("trackQuery").value = id;
-    findDocument(id, $("result"), true);
+    $("trackId").value=id;
+    find(id,$("result"));
   } else {
     dashboard();
   }
+});
+
+document.addEventListener("keydown",e=>{
+  if(e.key!=="Enter")return;
+  if(document.activeElement===$("homeId")) $("homeTrack").click();
+  if(document.activeElement===$("trackId")) $("trackBtn").click();
+  if(document.activeElement===$("routeId")) $("routeLoad").click();
 });
