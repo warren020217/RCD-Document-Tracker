@@ -3,97 +3,270 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+
 <meta name="theme-color" content="#17365d">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="PRO4A RCD">
-<meta name="description" content="PRO4A RCD Document Routing and Tracking System">
+
+<meta name="description"
+      content="PRO4A RCD Document Routing and Tracking System">
+
 <link rel="icon" type="image/png" href="assets/pro4a-logo.png">
 <link rel="apple-touch-icon" href="assets/pro4a-logo.png">
 <link rel="manifest" href="manifest.webmanifest">
+
 <title>PRO4A RCD Document Tracker</title>
+
 <link rel="stylesheet" href="styles.css">
 <script src="config.js"></script>
 </head>
+
 <body>
+
 <header class="top">
+
   <div class="brandLogo">
-    <img src="assets/pro4a-logo.png" alt="PRO4A Regional Comptrollership Division">
+    <img src="assets/pro4a-logo.png"
+         alt="PRO4A Regional Comptrollership Division">
   </div>
+
   <div class="brandText">
     <b>PRO4A RCD</b>
     <small>Document Routing &amp; Tracking</small>
   </div>
-  <button id="menu" class="menuBtn" aria-label="Open menu">☰</button>
+
+  <button id="menu"
+          class="menuBtn"
+          aria-label="Open menu">
+    ☰
+  </button>
+
 </header>
 
 <nav id="nav">
-  <button data-page="home">Home</button>
+  <button data-page="home" class="active">Home</button>
   <button data-page="track">Track</button>
   <button data-page="scan">Scan QR</button>
   <button data-page="route">Route</button>
 </nav>
 
 <main>
+
+<!-- ================= HOME ================= -->
+
 <section id="home" class="page active">
+
   <div class="hero">
-    <img class="heroLogo" src="assets/pro4a-logo.png" alt="PRO4A Regional Comptrollership Division">
+
+    <img class="heroLogo"
+         src="assets/pro4a-logo.png"
+         alt="PRO4A Regional Comptrollership Division">
+
     <div>
-      <div class="eyebrow">REGIONAL COMPTROLLERSHIP DIVISION</div>
+
+      <div class="eyebrow">
+        REGIONAL COMPTROLLERSHIP DIVISION
+      </div>
+
       <h1>Document Routing System</h1>
-      <p class="muted">Track where a document is and who currently has custody of it.</p>
+
+      <p class="muted">
+        Track a document by Control Ref ID or Subject / Title of Memo,
+        then forward it to the responsible personnel.
+      </p>
+
     </div>
+
   </div>
+
 
   <div class="cards">
-    <div><span>Total Documents</span><strong id="total">-</strong></div>
-    <div><span>Message Center</span><strong id="message">-</strong></div>
-    <div><span>Forwarded</span><strong id="forwarded">-</strong></div>
-    <div><span>Completed</span><strong id="completed">-</strong></div>
+
+    <div>
+      <span>Total Documents</span>
+      <strong id="total">-</strong>
+    </div>
+
+    <div>
+      <span>Message Center</span>
+      <strong id="message">-</strong>
+    </div>
+
+    <div>
+      <span>Forwarded</span>
+      <strong id="forwarded">-</strong>
+    </div>
+
+    <div>
+      <span>Completed</span>
+      <strong id="completed">-</strong>
+    </div>
+
   </div>
 
-  <div class="box">
+
+  <div class="box searchBox">
+
     <h2>Find a Document</h2>
-    <input id="homeId" placeholder="Enter Control Ref ID" autocomplete="off">
-    <button class="mainBtn" id="homeTrack">Track Document</button>
+
+    <p class="muted">
+      Enter either the Control Ref ID, Subject / Title of Memo,
+      or both.
+    </p>
+
+    <div class="two">
+
+      <input
+        id="homeId"
+        placeholder="Control Ref ID"
+        autocomplete="off">
+
+      <input
+        id="homeSubject"
+        placeholder="Subject / Title of Memo"
+        autocomplete="off">
+
+    </div>
+
+    <button
+      class="mainBtn"
+      id="homeTrack">
+      Track Document
+    </button>
+
   </div>
 
-  <div id="connectionStatus" class="connection pending">Connecting to PRO4A RCD Routing API...</div>
+
+  <div id="homeResult"></div>
+
+  <div
+    id="connectionStatus"
+    class="connection pending">
+    Connecting to PRO4A RCD Routing API...
+  </div>
+
 </section>
+
+
+<!-- ================= TRACK ================= -->
 
 <section id="track" class="page">
+
   <h1>Track Document</h1>
-  <p class="muted">Enter the Control Ref ID or open this page from a document QR code.</p>
-  <div class="box">
-    <input id="trackId" placeholder="Example: MEMO-2026-1222" autocomplete="off">
-    <button class="mainBtn" id="trackBtn">Search</button>
+
+  <p class="muted">
+    Search by Control Ref ID or Subject / Title of Memo.
+    The document details and forwarding controls will appear below.
+  </p>
+
+
+  <div class="box searchBox">
+
+    <div class="two">
+
+      <input
+        id="trackId"
+        placeholder="Control Ref ID"
+        autocomplete="off">
+
+      <input
+        id="trackSubject"
+        placeholder="Subject / Title of Memo"
+        autocomplete="off">
+
+    </div>
+
+    <button
+      class="mainBtn"
+      id="trackBtn">
+      Track Document
+    </button>
+
   </div>
+
+
   <div id="result"></div>
+
 </section>
+
+
+<!-- ================= SCAN ================= -->
 
 <section id="scan" class="page">
+
   <h1>Scan QR Code</h1>
-  <p class="muted">Allow camera access, then point the camera at the document QR code.</p>
+
+  <p class="muted">
+    Allow camera access, then point the camera at the document QR code.
+  </p>
+
   <div class="box center">
+
     <div id="reader"></div>
-    <p id="scanStatus" class="muted">Starting camera...</p>
+
+    <p
+      id="scanStatus"
+      class="muted">
+      Starting camera...
+    </p>
+
   </div>
+
 </section>
+
+
+<!-- ================= ROUTE ================= -->
 
 <section id="route" class="page">
+
   <h1>Route / Receive</h1>
-  <p class="muted">Load a document, select the destination section and personnel, then record the movement.</p>
-  <div class="box">
-    <input id="routeId" placeholder="Control Ref ID" autocomplete="off">
-    <button class="mainBtn" id="routeLoad">Load Document</button>
+
+  <p class="muted">
+    Load a document, select the concern section and personnel,
+    then record the movement.
+  </p>
+
+
+  <div class="box searchBox">
+
+    <input
+      id="routeId"
+      placeholder="Control Ref ID"
+      autocomplete="off">
+
+    <button
+      class="mainBtn"
+      id="routeLoad">
+      Load Document
+    </button>
+
   </div>
+
+
   <div id="routeResult"></div>
+
 </section>
+
 </main>
 
-<div id="toast" role="status" aria-live="polite"></div>
 
-<script src="https://unpkg.com/html5-qrcode" defer></script>
-<script src="app.js" defer></script>
+<div
+  id="toast"
+  role="status"
+  aria-live="polite">
+</div>
+
+
+<script
+  src="https://unpkg.com/html5-qrcode"
+  defer>
+</script>
+
+<script
+  src="app.js"
+  defer>
+</script>
+
 </body>
 </html>
