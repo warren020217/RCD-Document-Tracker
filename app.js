@@ -56,7 +56,6 @@ async function api(params = {}, timeoutMs = 20000) {
 
     });
 
-
     const response = await fetch(
       url.toString(),
       {
@@ -69,16 +68,13 @@ async function api(params = {}, timeoutMs = 20000) {
       }
     );
 
-
     const text = await response.text();
-
 
     if (!response.ok) {
       throw new Error(
         `RCD API HTTP ${response.status}`
       );
     }
-
 
     let data;
 
@@ -94,7 +90,6 @@ async function api(params = {}, timeoutMs = 20000) {
 
     }
 
-
     if (data?.result === "error") {
 
       throw new Error(
@@ -104,7 +99,6 @@ async function api(params = {}, timeoutMs = 20000) {
       );
 
     }
-
 
     return data;
 
@@ -154,13 +148,11 @@ function page(id) {
       section.classList.remove("active")
     );
 
-
   const target = $(id);
 
   if (target) {
     target.classList.add("active");
   }
-
 
   document
     .querySelectorAll("nav button")
@@ -171,11 +163,9 @@ function page(id) {
       )
     );
 
-
   document
     .querySelector("nav")
     ?.classList.remove("open");
-
 
   if (id === "scan") {
     startScan();
@@ -197,11 +187,9 @@ function toast(message) {
   element.textContent = message;
   element.style.display = "block";
 
-
   clearTimeout(
     window.__toastTimer
   );
-
 
   window.__toastTimer =
     setTimeout(
@@ -254,7 +242,7 @@ function showDoc(
 
   /*
    * If subject search returns multiple documents,
-   * show the list first.
+   * show the matching documents first.
    */
 
   if (
@@ -274,7 +262,6 @@ function showDoc(
   const d =
     data.document ||
     data;
-
 
   current = d;
 
@@ -355,17 +342,23 @@ function showDoc(
       <div class="fields">
 
         <div class="field wide">
+
           <label>
             Subject / Title of Memo
           </label>
 
           <b>
-            ${esc(d.subject || "N/A")}
+            ${esc(
+              d.subject ||
+              "N/A"
+            )}
           </b>
+
         </div>
 
 
         <div class="field">
+
           <label>
             Current Section
           </label>
@@ -376,10 +369,12 @@ function showDoc(
               "Not assigned"
             )}
           </b>
+
         </div>
 
 
         <div class="field">
+
           <label>
             Current Personnel
           </label>
@@ -390,10 +385,12 @@ function showDoc(
               "Not assigned"
             )}
           </b>
+
         </div>
 
 
         <div class="field">
+
           <label>
             Originating Office
           </label>
@@ -404,10 +401,12 @@ function showDoc(
               "N/A"
             )}
           </b>
+
         </div>
 
 
         <div class="field">
+
           <label>
             Received By
           </label>
@@ -418,10 +417,12 @@ function showDoc(
               "N/A"
             )}
           </b>
+
         </div>
 
 
         <div class="field">
+
           <label>
             Date Logged
           </label>
@@ -432,10 +433,12 @@ function showDoc(
               "N/A"
             )}
           </b>
+
         </div>
 
 
         <div class="field">
+
           <label>
             Action Required
           </label>
@@ -446,10 +449,12 @@ function showDoc(
               "N/A"
             )}
           </b>
+
         </div>
 
 
         <div class="field">
+
           <label>
             Date Received
           </label>
@@ -460,10 +465,12 @@ function showDoc(
               "N/A"
             )}
           </b>
+
         </div>
 
 
         <div class="field">
+
           <label>
             Location Status
           </label>
@@ -474,6 +481,23 @@ function showDoc(
               "N/A"
             )}
           </b>
+
+        </div>
+
+
+        <div class="field">
+
+          <label>
+            Routing Status
+          </label>
+
+          <b>
+            ${esc(
+              d.routingStatus ||
+              "N/A"
+            )}
+          </b>
+
         </div>
 
       </div>
@@ -517,6 +541,7 @@ function showDoc(
       }
 
     </div>
+
   `;
 
 
@@ -571,32 +596,41 @@ function showDocumentList(
 
             <div class="searchResult">
 
-              <div>
+              <div class="searchResultInfo">
 
                 <strong>
-                  ${esc(d.controlRefId)}
+                  ${esc(
+                    d.controlRefId
+                  )}
                 </strong>
 
                 <div class="resultSubject">
+
                   ${esc(
                     d.subject ||
                     "No subject"
                   )}
+
                 </div>
 
                 <small>
+
                   ${esc(
                     d.currentSection ||
                     "Unassigned"
                   )}
+
                   ·
+
                   ${esc(
                     d.currentPersonnel ||
                     "Unassigned"
                   )}
+
                 </small>
 
               </div>
+
 
               <button
                 class="resultBtn"
@@ -615,6 +649,7 @@ function showDocumentList(
       </div>
 
     </div>
+
   `;
 
 
@@ -634,8 +669,10 @@ function showDocumentList(
         showDoc(
           {
             result: "success",
+
             document:
               documents[index]
+
           },
           target,
           true
@@ -663,32 +700,44 @@ function routingPanel() {
       </h2>
 
       <p class="muted">
-        Select the section and concern personnel
-        who will receive this document.
+
+        Select the concern section and
+        personnel who will receive this document.
+
       </p>
 
 
       <label class="routeLabel">
+
         Concern Section
+
       </label>
+
 
       <select id="sec">
 
         <option value="">
+
           Select Concern Section
+
         </option>
 
       </select>
 
 
       <label class="routeLabel">
+
         Concern Personnel
+
       </label>
+
 
       <select id="person">
 
         <option value="">
+
           Select Concern Personnel
+
         </option>
 
       </select>
@@ -770,7 +819,9 @@ async function findDocument(
   target.innerHTML =
     `
       <div class="box loading">
+
         Searching document...
+
       </div>
     `;
 
@@ -778,8 +829,8 @@ async function findDocument(
   try {
 
     /*
-     * Control Ref ID takes priority when both
-     * fields are supplied.
+     * Control Ref ID takes priority
+     * when both are supplied.
      */
 
     const data =
@@ -804,7 +855,11 @@ async function findDocument(
     target.innerHTML =
       `
       <div class="error">
-        ${esc(error.message)}
+
+        ${esc(
+          error.message
+        )}
+
       </div>
       `;
 
@@ -837,7 +892,9 @@ async function loadSections() {
     select.innerHTML =
       `
       <option value="">
+
         Select Concern Section
+
       </option>
       `;
 
@@ -850,8 +907,11 @@ async function loadSections() {
             "option"
           );
 
-        option.value = section;
-        option.textContent = section;
+        option.value =
+          section;
+
+        option.textContent =
+          section;
 
         select.appendChild(
           option
@@ -888,7 +948,10 @@ async function loadPeople() {
     $("person");
 
 
-  if (!section || !personnel) {
+  if (
+    !section ||
+    !personnel
+  ) {
     return;
   }
 
@@ -896,7 +959,9 @@ async function loadPeople() {
   personnel.innerHTML =
     `
     <option value="">
+
       Select Concern Personnel
+
     </option>
     `;
 
@@ -926,8 +991,11 @@ async function loadPeople() {
             "option"
           );
 
-        option.value = name;
-        option.textContent = name;
+        option.value =
+          name;
+
+        option.textContent =
+          name;
 
         personnel.appendChild(
           option
@@ -1019,9 +1087,13 @@ async function move(
 
 
     if (button) {
-      button.disabled = true;
+
+      button.disabled =
+        true;
+
       button.textContent =
         "Saving...";
+
     }
 
 
@@ -1058,17 +1130,25 @@ async function move(
 
 
     /*
-     * Reload the document so the new
-     * custody information is visible.
+     * Reload the document after
+     * successful routing.
      */
 
-    await findDocument(
-      id,
-      "",
+    const resultTarget =
       $("result") ||
-      $("routeResult"),
-      true
-    );
+      $("routeResult");
+
+
+    if (resultTarget) {
+
+      await findDocument(
+        id,
+        "",
+        resultTarget,
+        true
+      );
+
+    }
 
 
     dashboard();
@@ -1096,6 +1176,7 @@ async function move(
       button.disabled =
         false;
 
+
       button.textContent =
         type === "FORWARD"
           ? "Forward to Concern Personnel"
@@ -1122,10 +1203,12 @@ async function startScan() {
   ) {
 
     if (!scanner) {
+
       setTimeout(
         startScan,
         500
       );
+
     }
 
     return;
@@ -1150,21 +1233,27 @@ async function startScan() {
 
       {
         fps: 10,
+
         qrbox: {
           width: 240,
           height: 240
         }
+
       },
 
       async text => {
 
         try {
+
           await scanner.stop();
+
         } catch (_) {}
 
 
         try {
+
           scanner.clear();
+
         } catch (_) {}
 
 
@@ -1314,7 +1403,7 @@ async function dashboard() {
 
 
 /* =========================================================
-   EVENTS
+   NAVIGATION EVENTS
 ========================================================= */
 
 document
@@ -1342,7 +1431,9 @@ $("menu").onclick = () => {
 };
 
 
-/* HOME */
+/* =========================================================
+   HOME SEARCH
+========================================================= */
 
 $("homeTrack").onclick =
   () => {
@@ -1374,7 +1465,9 @@ $("homeTrack").onclick =
   };
 
 
-/* TRACK */
+/* =========================================================
+   TRACK SEARCH
+========================================================= */
 
 $("trackBtn").onclick =
   () => {
@@ -1389,7 +1482,9 @@ $("trackBtn").onclick =
   };
 
 
-/* ROUTE */
+/* =========================================================
+   ROUTE PAGE SEARCH
+========================================================= */
 
 $("routeLoad").onclick =
   () => {
@@ -1404,7 +1499,9 @@ $("routeLoad").onclick =
   };
 
 
-/* MOVEMENT BUTTONS */
+/* =========================================================
+   MOVEMENT BUTTON EVENTS
+========================================================= */
 
 document.addEventListener(
   "click",
@@ -1444,7 +1541,7 @@ document.addEventListener(
 
 
 /* =========================================================
-   LOAD
+   INITIAL LOAD
 ========================================================= */
 
 window.addEventListener(
@@ -1505,9 +1602,10 @@ document.addEventListener(
 
     if (
       document.activeElement ===
-      $("homeId") ||
+        $("homeId") ||
+
       document.activeElement ===
-      $("homeSubject")
+        $("homeSubject")
     ) {
 
       $("homeTrack").click();
@@ -1517,9 +1615,10 @@ document.addEventListener(
 
     if (
       document.activeElement ===
-      $("trackId") ||
+        $("trackId") ||
+
       document.activeElement ===
-      $("trackSubject")
+        $("trackSubject")
     ) {
 
       $("trackBtn").click();
