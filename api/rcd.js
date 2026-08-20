@@ -21,7 +21,8 @@ module.exports = async function handler(req, res) {
       method: "GET",
       redirect: "follow",
       headers: {
-        "Accept": "application/json,text/plain,*/*"
+        "Accept": "application/json,text/plain,*/*",
+        "User-Agent": "PRO4A-RCD-Document-Tracker/1.0"
       }
     });
 
