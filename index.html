@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#17365d">
+<title>PRO4A RCD Document Tracker</title>
+<link rel="stylesheet" href="styles.css">
+<script src="config.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="logo">RCD</div>
+  <div>
+    <b>PRO4A RCD</b>
+    <small>Document Tracker</small>
+  </div>
+  <button id="menu">☰</button>
+</header>
+
+<nav id="nav">
+  <button data-page="home">Home</button>
+  <button data-page="track">Track</button>
+  <button data-page="scan">Scan QR</button>
+  <button data-page="route">Route</button>
+</nav>
+
+<main>
+<section id="home" class="page active">
+  <h1>Document Tracker</h1>
+  <p class="muted">Quickly find out where a document is and who received it.</p>
+
+  <div class="cards">
+    <div><span>Total</span><strong id="total">-</strong></div>
+    <div><span>Message Center</span><strong id="message">-</strong></div>
+    <div><span>Forwarded</span><strong id="forwarded">-</strong></div>
+    <div><span>Completed</span><strong id="completed">-</strong></div>
+  </div>
+
+  <div class="box">
+    <h2>Find a Document</h2>
+    <input id="homeId" placeholder="Control Ref ID">
+    <button class="mainBtn" id="homeTrack">Track Document</button>
+  </div>
+</section>
+
+<section id="track" class="page">
+  <h1>Track Document</h1>
+  <div class="box">
+    <input id="trackId" placeholder="Example: MEMO-2026-1222">
+    <button class="mainBtn" id="trackBtn">Search</button>
+  </div>
+  <div id="result"></div>
+</section>
+
+<section id="scan" class="page">
+  <h1>Scan QR Code</h1>
+  <p class="muted">Point your camera at the QR code attached to the document.</p>
+  <div class="box center">
+    <div id="reader"></div>
+    <p id="scanStatus" class="muted">Starting camera...</p>
+  </div>
+</section>
+
+<section id="route" class="page">
+  <h1>Route / Receive</h1>
+  <div class="box">
+    <input id="routeId" placeholder="Control Ref ID">
+    <button class="mainBtn" id="routeLoad">Load Document</button>
+  </div>
+  <div id="routeResult"></div>
+</section>
+</main>
+
+<div id="toast"></div>
+
+<script src="https://unpkg.com/html5-qrcode" defer></script>
+<script src="app.js" defer></script>
+</body>
+</html>
