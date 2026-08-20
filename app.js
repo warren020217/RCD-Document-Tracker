@@ -5,36 +5,52 @@ const $=id=>document.getElementById(id);
 const esc=v=>String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
 
 function api(params={}, timeoutMs=20000) {
-  return new Promise((resolve,reject)=>{
-    if(!API_URL) return reject(new Error("RCD API URL is missing."));
-    const cb="rcdApiCallback_"+(++jsonpCounter)+"_"+Date.now();
-    const script=document.createElement("script");
-    const u=new URL(API_URL);
-    Object.entries(params).forEach(([k,v])=>u.searchParams.set(k,String(v)));
-    u.searchParams.set("callback",cb);
-    let done=false;
-    const cleanup=()=>{
-      if(done)return;
-      done=true;
+  return new Promise(async (resolve, reject) => {
+    if (!API_URL) return reject(new Error("RCD API URL is missing."));
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const u = new URL(API_URL, window.location.origin);
+      Object.entries(params).forEach(([k,v]) => {
+        if (v !== undefined && v !== null) u.searchParams.set(k, String(v));
+      });
+
+      const response = await fetch(u.toString(), {
+        method: "GET",
+        headers: { "Accept": "application/json" },
+        cache: "no-store",
+        signal: controller.signal
+      });
+
+      const text = await response.text();
+
+      if (!response.ok) {
+        throw new Error(`RCD API HTTP ${response.status}`);
+      }
+
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (_) {
+        throw new Error("RCD API returned invalid JSON.");
+      }
+
+      if (data?.result === "error") {
+        throw new Error(data.error || data.message || "RCD API returned an error.");
+      }
+
+      resolve(data);
+    } catch (e) {
+      if (e.name === "AbortError") {
+        reject(new Error("RCD API timed out. Please try again."));
+      } else {
+        reject(e);
+      }
+    } finally {
       clearTimeout(timer);
-      try{delete window[cb]}catch(_){}
-      script.remove();
-    };
-    const timer=setTimeout(()=>{
-      cleanup();
-      reject(new Error("RCD API timed out. Check the Apps Script Web App deployment and access setting."));
-    },timeoutMs);
-    window[cb]=(data)=>{
-      cleanup();
-      if(data?.result==="error") reject(new Error(data.error||data.message||"RCD API returned an error."));
-      else resolve(data);
-    };
-    script.onerror=()=>{
-      cleanup();
-      reject(new Error("Cannot connect to the RCD Apps Script API."));
-    };
-    script.src=u.toString();
-    document.body.appendChild(script);
+    }
   });
 }
 
@@ -130,18 +146,15 @@ async function move(type){
   if(type!=="COMPLETE"&&(!s||!p))return toast("Select the section and personnel.");
 
   try{
-    // Newer API deployments expose route / receive / complete separately.
-    // Older deployments expose routeDocument. Support both.
-    let d;
-    try{
-      d=await apiAction(type==="FORWARD"?"route":type==="RECEIVE"?"receive":"complete",{
-        id:id,section:s,personnel:p,remarks:r,movement:type
-      });
-    }catch(firstError){
-      d=await apiAction("routeDocument",{
-        id:id,movement:type,section:s,personnel:p,remarks:r
-      });
-    }
+    // Confirmed Apps Script deployment exposes routeDocument.
+    // Keep all movement operations on this stable API contract.
+    const d = await apiAction("routeDocument",{
+      id:id,
+      movement:type,
+      section:s,
+      personnel:p,
+      remarks:r
+    });
 
     if(d?.result==="error") throw new Error(d.error||d.message||"Movement was not recorded.");
     toast(d.message||"Document movement recorded.");
