@@ -4,9 +4,9 @@ let current=null,scanner=null,jsonpCounter=0;
 const $=id=>document.getElementById(id);
 const esc=v=>String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
 
-function api(params={}) {
+function api(params={}, timeoutMs=20000) {
   return new Promise((resolve,reject)=>{
-    if(!API_URL) return reject(new Error("Google Apps Script API URL is missing."));
+    if(!API_URL) return reject(new Error("RCD API URL is missing."));
     const cb="rcdApiCallback_"+(++jsonpCounter)+"_"+Date.now();
     const script=document.createElement("script");
     const u=new URL(API_URL);
@@ -17,25 +17,29 @@ function api(params={}) {
       if(done)return;
       done=true;
       clearTimeout(timer);
-      delete window[cb];
+      try{delete window[cb]}catch(_){}
       script.remove();
     };
     const timer=setTimeout(()=>{
       cleanup();
-      reject(new Error("Google Sheet connection timed out. Check the Apps Script Web App deployment and access setting."));
-    },20000);
+      reject(new Error("RCD API timed out. Check the Apps Script Web App deployment and access setting."));
+    },timeoutMs);
     window[cb]=(data)=>{
       cleanup();
-      if(data?.result==="error") reject(new Error(data.error||data.message||"Google Apps Script error."));
+      if(data?.result==="error") reject(new Error(data.error||data.message||"RCD API returned an error."));
       else resolve(data);
     };
     script.onerror=()=>{
       cleanup();
-      reject(new Error("Cannot connect to the Google Apps Script Web App."));
+      reject(new Error("Cannot connect to the RCD Apps Script API."));
     };
     script.src=u.toString();
     document.body.appendChild(script);
   });
+}
+
+async function apiAction(action, params={}) {
+  return api(Object.assign({},params,{action}));
 }
 
 function page(id){
@@ -121,10 +125,26 @@ async function loadPeople(){
 
 async function move(type){
   let id=current?.controlRefId,s=$("sec")?.value||"",p=$("person")?.value||"",r=$("remarks")?.value||"";
+  if(!id)return toast("Load a document first.");
+
   if(type!=="COMPLETE"&&(!s||!p))return toast("Select the section and personnel.");
+
   try{
-    let d=await api({action:"routeDocument",id,movement:type,section:s,personnel:p,remarks:r});
-    toast(d.message||"Saved");
+    // Newer API deployments expose route / receive / complete separately.
+    // Older deployments expose routeDocument. Support both.
+    let d;
+    try{
+      d=await apiAction(type==="FORWARD"?"route":type==="RECEIVE"?"receive":"complete",{
+        id:id,section:s,personnel:p,remarks:r,movement:type
+      });
+    }catch(firstError){
+      d=await apiAction("routeDocument",{
+        id:id,movement:type,section:s,personnel:p,remarks:r
+      });
+    }
+
+    if(d?.result==="error") throw new Error(d.error||d.message||"Movement was not recorded.");
+    toast(d.message||"Document movement recorded.");
     find(id,$("routeResult"),true);
     dashboard();
   }catch(e){toast(e.message)}
@@ -150,11 +170,12 @@ async function startScan(){
 
 async function dashboard(){
   try{
-    let d=await api({action:"dashboard"}),m=d.metrics||{};
-    $("total").textContent=m.total??0;
-    $("message").textContent=m.messageCenter??0;
-    $("forwarded").textContent=m.forwarded??0;
-    $("completed").textContent=m.completed??0;
+    const d=await apiAction("dashboard");
+    const m=d.metrics||{};
+    $("total").textContent=Number(m.total??0).toLocaleString();
+    $("message").textContent=Number(m.messageCenter??0).toLocaleString();
+    $("forwarded").textContent=Number(m.forwarded??0).toLocaleString();
+    $("completed").textContent=Number(m.completed??0).toLocaleString();
     $("connectionStatus").textContent="Connected to RCD routing database";
     $("connectionStatus").className="connection ok";
   }catch(e){
@@ -162,8 +183,9 @@ async function dashboard(){
     $("message").textContent="-";
     $("forwarded").textContent="-";
     $("completed").textContent="-";
-    $("connectionStatus").textContent="Database connection unavailable";
+    $("connectionStatus").textContent="RCD API unavailable: "+e.message;
     $("connectionStatus").className="connection errorConn";
+    console.error("Dashboard API error:",e);
   }
 }
 
@@ -187,4 +209,11 @@ window.addEventListener("load",()=>{
   } else {
     dashboard();
   }
+});
+
+document.addEventListener("keydown",e=>{
+  if(e.key!=="Enter")return;
+  if(document.activeElement===$("homeId")) $("homeTrack").click();
+  if(document.activeElement===$("trackId")) $("trackBtn").click();
+  if(document.activeElement===$("routeId")) $("routeLoad").click();
 });

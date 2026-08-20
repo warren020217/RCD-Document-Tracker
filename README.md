@@ -1,23 +1,31 @@
-# PRO4A RCD Document Tracker - Rebuilt
+# PRO4A RCD Document Routing System
 
-This build uses the exact official PRO4A RCD logo supplied for this project.
+Rebuilt frontend for the PRO4A Regional Comptrollership Division Document Routing System.
 
-The logo file is used unchanged as:
-- website header logo
-- home-page logo
-- favicon
-- Apple touch icon
-- PWA icon
+## Backend
 
-Website API configuration is in `config.js`.
+The website is configured to use the confirmed working Google Apps Script Web App API:
 
-The website keeps the existing Apps Script API contract:
-- dashboard
-- getDocument
-- getSections
-- getPersonnel
-- routeDocument
+`https://script.google.com/macros/s/AKfycbzHugvrj1wVLXJV_ov9iUoeC9JL9M55fXRpbVLIHauMHkd2lpUNgb6KqPHLE53-Ed93gg/exec`
 
-QR links open the website with `?id=CONTROL_REF_ID`.
+The dashboard endpoint returns the current database metrics. The frontend displays those metrics directly.
 
-Before deployment, make sure the Apps Script Web App is deployed and `config.js` contains its current `/exec` URL.
+## Supported API actions
+
+The frontend supports:
+
+- `dashboard`
+- `getDocument`
+- `getSections`
+- `getPersonnel`
+- `route`
+- `receive`
+- `complete`
+
+For compatibility, it also falls back to the older `routeDocument` action when necessary.
+
+## Deployment
+
+Upload the contents of this project to the existing Vercel project. Make sure `config.js` is included in the deployment and is loaded before `app.js`.
+
+The official PRO4A RCD logo in `assets/pro4a-logo.png` is retained.
