@@ -21,7 +21,7 @@ const CONFIG = {
   SYNC_LOG: "SYNC LOG",
   SETTINGS: "SETTINGS",
 
-  WEB_APP_URL: "https://script.google.com/macros/s/AKfycbxUZtmJ7JHH6loEN2jXVZJBCbPcsDZFOq69nBinue33YjWZQ_NXE-Zo7D9CkLNILbJm_w/exec",
+  WEB_APP_URL: "https://script.google.com/macros/s/AKfycbzXUw5_w_YlCDEHgW0zysoyRDdADF01yK-n7pHpKqv4f8kBFk82O9PXPLn_8GrsJqsMlg/exec",
   APP_URL: "https://rcd-document-tracker.vercel.app"
 };
 
@@ -203,7 +203,7 @@ function setupDatabase() {
   const settings = getOrCreateSheet_("SETTINGS");
   settings.clear();
   settings.getRange(1,1,1,2).setValues([["Setting","Value"]]);
-  settings.getRange(2,1,4,2).setValues([
+  settings.getRange(2,1,5,2).setValues([
     ["Source Spreadsheet ID",CONFIG.SOURCE_SPREADSHEET_ID],
     ["Source Sheet",CONFIG.SOURCE_SHEET_NAME],
     ["Routing Database Spreadsheet ID",ss.getId()],
