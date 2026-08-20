@@ -1,4 +1,4 @@
-let API_URL=(window.RCD_CONFIG||{}).API_URL||localStorage.getItem("RCD_API_URL")||"";
+let API_URL=(window.RCD_CONFIG||{}).API_URL||localStorage.getItem("RCD_API_URL")||"/api/rcd";
 let current=null,scanner=null,jsonpCounter=0;
 
 const $=id=>document.getElementById(id);
@@ -181,6 +181,66 @@ async function startScan(){
   }
 }
 
+
+function formatMemoDate(value){
+  if(value===undefined||value===null||value==="") return "";
+  const d=new Date(value);
+  if(!Number.isNaN(d.getTime())) return d.toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"});
+  return String(value);
+}
+
+function renderLatestMemos(data){
+  const target=$("latestMemos");
+  if(!target)return;
+
+  if(!data||data.result==="error"){
+    target.innerHTML=`<div class="error">${esc(data?.message||data?.error||"Unable to load latest memos.")}</div>`;
+    return;
+  }
+
+  const rows=Array.isArray(data.documents)?data.documents:[];
+  if(!rows.length){
+    target.innerHTML='<p class="muted">No memos found.</p>';
+    return;
+  }
+
+  target.innerHTML=rows.map(d=>`
+    <div class="memoItem">
+      <div class="memoMain">
+        <div class="memoRef">${esc(d.controlRefId||"")}</div>
+        <div class="memoSubject">${esc(d.subject||"Untitled Memo")}</div>
+        <div class="memoMeta">
+          ${esc(d.originatingOffice||"")} ${d.dateLogged?`· ${esc(formatMemoDate(d.dateLogged))}`:""}
+        </div>
+      </div>
+      <div class="memoActions">
+        <button class="memoForward" type="button" data-memo-id="${esc(d.controlRefId||"")}">Forward</button>
+      </div>
+    </div>
+  `).join("");
+
+  target.querySelectorAll(".memoForward").forEach(btn=>{
+    btn.addEventListener("click",()=>{
+      const id=btn.dataset.memoId||"";
+      page("route");
+      $("routeId").value=id;
+      find(id,$("routeResult"),true);
+    });
+  });
+}
+
+async function latestMemos(){
+  const target=$("latestMemos");
+  if(!target)return;
+  target.innerHTML='<div class="box loading">Loading latest memos...</div>';
+  try{
+    const d=await apiAction("getDocuments",{limit:20});
+    renderLatestMemos(d);
+  }catch(e){
+    target.innerHTML=`<div class="error">Unable to load latest memos: ${esc(e.message)}</div>`;
+  }
+}
+
 async function dashboard(){
   try{
     const d=await apiAction("dashboard");
@@ -221,7 +281,9 @@ window.addEventListener("load",()=>{
     find(id,$("result"));
   } else {
     dashboard();
+    latestMemos();
   }
+  $("refreshMemos")?.addEventListener("click",latestMemos);
 });
 
 document.addEventListener("keydown",e=>{

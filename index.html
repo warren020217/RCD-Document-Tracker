@@ -59,6 +59,19 @@
   </div>
 
   <div id="connectionStatus" class="connection pending">Connecting to PRO4A RCD Routing API...</div>
+
+  <div class="box latestBox">
+    <div class="latestHeader">
+      <div>
+        <h2>Latest Memos</h2>
+        <p class="muted">Newest records appear first.</p>
+      </div>
+      <button class="refreshBtn" id="refreshMemos" type="button">Refresh</button>
+    </div>
+    <div id="latestMemos">
+      <div class="loading">Loading latest memos...</div>
+    </div>
+  </div>
 </section>
 
 <section id="track" class="page">
