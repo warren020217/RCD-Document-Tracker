@@ -1,16 +1,23 @@
-# PRO4A RCD Document Tracker - Final Connected Build
+# PRO4A RCD Document Tracker - Rebuilt
 
-Website: https://rcd-document-tracker.vercel.app
-Google Apps Script API: https://script.google.com/macros/s/AKfycbxUZtmJ7JHH6loEN2jXVZJBCbPcsDZFOq69nBinue33YjWZQ_NXE-Zo7D9CkLNILbJm_w/exec
+This build uses the exact official PRO4A RCD logo supplied for this project.
 
-IMPORTANT:
-1. Replace the NEW spreadsheet's Code.gs with apps-script/Code.gs.
-2. Save.
-3. Run setupDatabase once only if the tabs need to be created/reset.
-4. Run syncDocuments once with the optimized bulk-sync version.
-5. Deploy the Apps Script as a Web App, execute as the owner, access for the intended users.
-6. Redeploy the Vercel website with this entire package.
+The logo file is used unchanged as:
+- website header logo
+- home-page logo
+- favicon
+- Apple touch icon
+- PWA icon
 
-The old Memo Logbook is read-only for this routing system.
-The QR code points to the website, not to the Apps Script endpoint.
-The website uses JSONP for Apps Script browser communication.
+Website API configuration is in `config.js`.
+
+The website keeps the existing Apps Script API contract:
+- dashboard
+- getDocument
+- getSections
+- getPersonnel
+- routeDocument
+
+QR links open the website with `?id=CONTROL_REF_ID`.
+
+Before deployment, make sure the Apps Script Web App is deployed and `config.js` contains its current `/exec` URL.

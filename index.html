@@ -2,21 +2,29 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#17365d">
-<title>PRO4A RCD Document Tracker</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="PRO4A RCD">
+<meta name="description" content="PRO4A RCD Document Routing and Tracking System">
 <link rel="icon" type="image/png" href="assets/pro4a-logo.png">
+<link rel="apple-touch-icon" href="assets/pro4a-logo.png">
+<link rel="manifest" href="manifest.webmanifest">
+<title>PRO4A RCD Document Tracker</title>
 <link rel="stylesheet" href="styles.css">
 <script src="config.js"></script>
 </head>
 <body>
 <header class="top">
-  <div class="logo"><img src="assets/pro4a-logo.png" alt="PRO4A RCD"></div>
-  <div>
-    <b>PRO4A RCD</b>
-    <small>Document Tracker</small>
+  <div class="brandLogo">
+    <img src="assets/pro4a-logo.png" alt="PRO4A Regional Comptrollership Division">
   </div>
-  <button id="menu">☰</button>
+  <div class="brandText">
+    <b>PRO4A RCD</b>
+    <small>Document Routing &amp; Tracking</small>
+  </div>
+  <button id="menu" class="menuBtn" aria-label="Open menu">☰</button>
 </header>
 
 <nav id="nav">
@@ -28,11 +36,17 @@
 
 <main>
 <section id="home" class="page active">
-  <h1>Document Tracker</h1>
-  <p class="muted">Quickly find out where a document is and who received it.</p>
+  <div class="hero">
+    <img class="heroLogo" src="assets/pro4a-logo.png" alt="PRO4A Regional Comptrollership Division">
+    <div>
+      <div class="eyebrow">REGIONAL COMPTROLLERSHIP DIVISION</div>
+      <h1>Document Routing System</h1>
+      <p class="muted">Track where a document is and who currently has custody of it.</p>
+    </div>
+  </div>
 
   <div class="cards">
-    <div><span>Total</span><strong id="total">-</strong></div>
+    <div><span>Total Documents</span><strong id="total">-</strong></div>
     <div><span>Message Center</span><strong id="message">-</strong></div>
     <div><span>Forwarded</span><strong id="forwarded">-</strong></div>
     <div><span>Completed</span><strong id="completed">-</strong></div>
@@ -40,15 +54,18 @@
 
   <div class="box">
     <h2>Find a Document</h2>
-    <input id="homeId" placeholder="Control Ref ID">
+    <input id="homeId" placeholder="Enter Control Ref ID" autocomplete="off">
     <button class="mainBtn" id="homeTrack">Track Document</button>
   </div>
+
+  <div id="connectionStatus" class="connection pending">Checking Google Sheet connection...</div>
 </section>
 
 <section id="track" class="page">
   <h1>Track Document</h1>
+  <p class="muted">Enter the Control Ref ID or open this page from a document QR code.</p>
   <div class="box">
-    <input id="trackId" placeholder="Example: MEMO-2026-1222">
+    <input id="trackId" placeholder="Example: MEMO-2026-1222" autocomplete="off">
     <button class="mainBtn" id="trackBtn">Search</button>
   </div>
   <div id="result"></div>
@@ -56,7 +73,7 @@
 
 <section id="scan" class="page">
   <h1>Scan QR Code</h1>
-  <p class="muted">Point your camera at the QR code attached to the document.</p>
+  <p class="muted">Allow camera access, then point the camera at the document QR code.</p>
   <div class="box center">
     <div id="reader"></div>
     <p id="scanStatus" class="muted">Starting camera...</p>
@@ -65,15 +82,16 @@
 
 <section id="route" class="page">
   <h1>Route / Receive</h1>
+  <p class="muted">Load a document, select the destination section and personnel, then record the movement.</p>
   <div class="box">
-    <input id="routeId" placeholder="Control Ref ID">
+    <input id="routeId" placeholder="Control Ref ID" autocomplete="off">
     <button class="mainBtn" id="routeLoad">Load Document</button>
   </div>
   <div id="routeResult"></div>
 </section>
 </main>
 
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite"></div>
 
 <script src="https://unpkg.com/html5-qrcode" defer></script>
 <script src="app.js" defer></script>

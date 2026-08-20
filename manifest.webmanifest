@@ -1,0 +1,16 @@
+{
+  "name": "PRO4A RCD Document Routing System",
+  "short_name": "PRO4A RCD",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f4f6f8",
+  "theme_color": "#17365d",
+  "icons": [
+    {
+      "src": "assets/pro4a-logo.png",
+      "sizes": "1600x1595",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
