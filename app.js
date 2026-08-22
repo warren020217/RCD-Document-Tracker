@@ -80,7 +80,7 @@ function showDoc(data,target,actions=false){
   }
   let d=data.document||data;
   current=d;
-  let hist=(d.history||[]).map(x=>`<div class="move"><b>${esc(x.action)}</b><br>${esc(x.fromSection||"Initial")} → ${esc(x.toSection||"")}<small>${esc(x.personnel||"")} · ${esc(x.dateTime||"")}</small>${x.remarks?`<small>${esc(x.remarks)}</small>`:""}</div>`).join("")||'<p class="muted">No movement history.</p>';
+  let hist=(d.history||[]).map(x=>`<div class="move"><b>${esc(x.action)}</b><br>${esc(x.fromSection||"Initial")} → ${esc(x.toSection||"")}<small>${esc(x.personnel||"")} · ${esc(x.dateTime||"")}</small>${x.remarks?`<small>${esc(x.remarks)}</small>`:""}`).join("")||'<p class="muted">No movement history.</p>';
 
   target.innerHTML=`<div class="doc">
     <div class="docHead"><div class="docId">${esc(d.controlRefId)}</div><span class="status">${esc(d.routingStatus||d.locationStatus||"Unassigned")}</span></div>
@@ -146,8 +146,6 @@ async function move(type){
   if(type!=="COMPLETE"&&(!s||!p))return toast("Select the section and personnel.");
 
   try{
-    // Confirmed Apps Script deployment exposes routeDocument.
-    // Keep all movement operations on this stable API contract.
     const d = await apiAction("routeDocument",{
       id:id,
       movement:type,
@@ -181,7 +179,6 @@ async function startScan(){
   }
 }
 
-
 function formatMemoDate(value){
   if(value===undefined||value===null||value==="") return "";
   const d=new Date(value);
@@ -198,11 +195,19 @@ function renderLatestMemos(data){
     return;
   }
 
-  const rows=Array.isArray(data.documents)?data.documents:[];
+  let rows=Array.isArray(data.documents)?data.documents:[];
   if(!rows.length){
     target.innerHTML='<p class="muted">No memos found.</p>';
     return;
   }
+
+  // Keep newest records first even if the API response order changes.
+  rows=rows.map((d,index)=>({...d,__index:index})).sort((a,b)=>{
+    const ad=new Date(a.dateLogged||a.dateReceived||a.createdAt||0).getTime();
+    const bd=new Date(b.dateLogged||b.dateReceived||b.createdAt||0).getTime();
+    if(Number.isFinite(ad)&&Number.isFinite(bd)&&ad!==bd)return bd-ad;
+    return a.__index-b.__index;
+  }).slice(0,20);
 
   target.innerHTML=rows.map(d=>`
     <div class="memoItem">
@@ -214,10 +219,20 @@ function renderLatestMemos(data){
         </div>
       </div>
       <div class="memoActions">
+        <button class="memoView" type="button" data-memo-id="${esc(d.controlRefId||"")}">View</button>
         <button class="memoForward" type="button" data-memo-id="${esc(d.controlRefId||"")}">Forward</button>
       </div>
     </div>
   `).join("");
+
+  target.querySelectorAll(".memoView").forEach(btn=>{
+    btn.addEventListener("click",()=>{
+      const id=btn.dataset.memoId||"";
+      page("track");
+      $("trackId").value=id;
+      find(id,$("result"));
+    });
+  });
 
   target.querySelectorAll(".memoForward").forEach(btn=>{
     btn.addEventListener("click",()=>{
