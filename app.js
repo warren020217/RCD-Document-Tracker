@@ -219,29 +219,285 @@ function renderLatestMemos(data){
         </div>
       </div>
       <div class="memoActions">
-        <button class="memoView" type="button" data-memo-id="${esc(d.controlRefId||"")}">View</button>
-        <button class="memoForward" type="button" data-memo-id="${esc(d.controlRefId||"")}">Forward</button>
+        <button class="memoForward" type="button" data-memo-id="${esc(d.controlRefId||"")}" data-memo-action="view">View</button>
+        <button class="memoForward" type="button" data-memo-id="${esc(d.controlRefId||"")}" data-memo-action="forward">Forward</button>
       </div>
     </div>
   `).join("");
 
-  target.querySelectorAll(".memoView").forEach(btn=>{
-    btn.addEventListener("click",()=>{
-      const id=btn.dataset.memoId||"";
-      page("track");
-      $("trackId").value=id;
-      find(id,$("result"));
-    });
-  });
-
   target.querySelectorAll(".memoForward").forEach(btn=>{
     btn.addEventListener("click",()=>{
       const id=btn.dataset.memoId||"";
-      page("route");
-      $("routeId").value=id;
-      find(id,$("routeResult"),true);
+      const mode=btn.dataset.memoAction||"view";
+      openMemoModal(id,mode);
     });
   });
+}
+
+
+function ensureMemoModal(){
+  let modal=$("memoModal");
+  if(modal)return modal;
+
+  modal=document.createElement("div");
+  modal.id="memoModal";
+  modal.className="memoModal";
+  modal.innerHTML=`
+    <div class="memoModalBackdrop" data-modal-close="1"></div>
+    <div class="memoModalPanel" role="dialog" aria-modal="true" aria-labelledby="memoModalTitle">
+      <div class="memoModalHead">
+        <div>
+          <div id="memoModalTitle">Document</div>
+          <div id="memoModalRef" class="memoModalRef"></div>
+        </div>
+        <button type="button" class="memoModalClose" data-modal-close="1" aria-label="Close">×</button>
+      </div>
+      <div id="memoModalBody" class="memoModalBody"></div>
+    </div>`;
+
+  document.body.appendChild(modal);
+
+  modal.addEventListener("click",e=>{
+    if(e.target.dataset.modalClose==="1")closeMemoModal();
+  });
+
+  return modal;
+}
+
+function closeMemoModal(){
+  const modal=$("memoModal");
+  if(!modal)return;
+  modal.classList.remove("open");
+  document.body.classList.remove("modalOpen");
+}
+
+function injectMemoModalStyles(){
+  if($("memoModalStyles"))return;
+
+  const style=document.createElement("style");
+  style.id="memoModalStyles";
+  style.textContent=`
+    .memoActions{display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
+    .memoForward{
+      appearance:none;
+      border:1px solid #cbd5e1;
+      border-radius:10px;
+      background:#fff;
+      color:#173b67;
+      font:inherit;
+      font-weight:600;
+      padding:9px 16px;
+      min-width:86px;
+      cursor:pointer;
+      transition:background .15s,border-color .15s,transform .05s;
+    }
+    .memoForward:hover{background:#f4f7fa;border-color:#b8c5d4}
+    .memoForward:active{transform:translateY(1px)}
+    .memoModal{position:fixed;inset:0;z-index:9999;display:none}
+    .memoModal.open{display:block}
+    .memoModalBackdrop{position:absolute;inset:0;background:rgba(15,23,42,.48)}
+    .memoModalPanel{
+      position:relative;
+      width:min(720px,calc(100% - 28px));
+      max-height:calc(100vh - 32px);
+      overflow:auto;
+      margin:16px auto;
+      background:#fff;
+      border:1px solid #d9e0e7;
+      border-radius:16px;
+      box-shadow:0 20px 60px rgba(15,23,42,.28);
+    }
+    .memoModalHead{
+      position:sticky;top:0;z-index:2;
+      display:flex;justify-content:space-between;align-items:center;
+      gap:16px;padding:18px 20px;
+      background:#fff;border-bottom:1px solid #e5e7eb;
+    }
+    #memoModalTitle{font-size:20px;font-weight:700;color:#173b67}
+    .memoModalRef{margin-top:3px;font-size:13px;color:#64748b}
+    .memoModalClose{
+      width:40px;height:40px;border:1px solid #d1d5db;border-radius:10px;
+      background:#fff;color:#334155;font-size:26px;line-height:1;cursor:pointer
+    }
+    .memoModalBody{padding:20px}
+    .memoPopupFields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+    .memoPopupField{border:1px solid #e2e8f0;border-radius:10px;padding:12px;background:#f8fafc}
+    .memoPopupField.wide{grid-column:1/-1}
+    .memoPopupField label{display:block;font-size:12px;color:#64748b;margin-bottom:4px}
+    .memoPopupField b{display:block;color:#0f172a;line-height:1.35}
+    .memoPopupHistory{margin-top:18px}
+    .memoPopupHistory h3{margin:0 0 10px;color:#173b67}
+    .memoPopupMove{padding:11px 0;border-top:1px solid #e5e7eb}
+    .memoPopupMove small{display:block;color:#64748b;margin-top:3px}
+    .memoPopupActions{margin-top:18px}
+    .memoPopupActions label{display:block;font-size:13px;font-weight:600;margin:0 0 6px;color:#334155}
+    .memoPopupActions select,.memoPopupActions textarea{
+      width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:10px;
+      padding:11px 12px;background:#fff;font:inherit
+    }
+    .memoPopupTwo{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+    .memoPopupButtons{display:flex;gap:10px;justify-content:flex-end;margin-top:12px}
+    .memoPopupPrimary,.memoPopupSecondary{
+      border:1px solid #cbd5e1;border-radius:10px;padding:10px 16px;
+      font:inherit;font-weight:600;cursor:pointer
+    }
+    .memoPopupPrimary{background:#173b67;color:#fff;border-color:#173b67}
+    .memoPopupSecondary{background:#fff;color:#173b67}
+    @media(max-width:600px){
+      .memoModalPanel{width:calc(100% - 18px);margin:9px auto;max-height:calc(100vh - 18px)}
+      .memoPopupFields,.memoPopupTwo{grid-template-columns:1fr}
+      .memoPopupField.wide{grid-column:auto}
+      .memoModalBody{padding:14px}
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function memoPopupFields(d){
+  return `
+    <div class="memoPopupFields">
+      <div class="memoPopupField"><label>Current Section</label><b>${esc(d.currentSection||"Not assigned")}</b></div>
+      <div class="memoPopupField"><label>Current Personnel</label><b>${esc(d.currentPersonnel||"Not assigned")}</b></div>
+      <div class="memoPopupField"><label>Originating Office</label><b>${esc(d.originatingOffice||"")}</b></div>
+      <div class="memoPopupField"><label>Received By</label><b>${esc(d.receivedBy||"")}</b></div>
+      <div class="memoPopupField wide"><label>Subject / Title</label><b>${esc(d.subject||"Untitled Memo")}</b></div>
+      <div class="memoPopupField"><label>Date Logged</label><b>${esc(d.dateLogged||"")}</b></div>
+      <div class="memoPopupField"><label>Action Required</label><b>${esc(d.actionRequired||"")}</b></div>
+      <div class="memoPopupField"><label>Date Received</label><b>${esc(d.dateReceived||"")}</b></div>
+      <div class="memoPopupField"><label>Status</label><b>${esc(d.routingStatus||d.locationStatus||"Unassigned")}</b></div>
+    </div>`;
+}
+
+function memoPopupHistory(d){
+  const hist=(d.history||[]).map(x=>`
+    <div class="memoPopupMove">
+      <b>${esc(x.action||"Movement")}</b><br>
+      ${esc(x.fromSection||"Initial")} → ${esc(x.toSection||"")}
+      <small>${esc(x.personnel||"")} · ${esc(x.dateTime||"")}</small>
+      ${x.remarks?`<small>${esc(x.remarks)}</small>`:""}
+    </div>`).join("") || '<p class="muted">No movement history.</p>';
+
+  return `<div class="memoPopupHistory"><h3>Movement History</h3>${hist}</div>`;
+}
+
+async function openMemoModal(id,mode="view"){
+  id=(id||"").trim();
+  if(!id)return toast("Control Ref ID is missing.");
+
+  const modal=ensureMemoModal();
+  injectMemoModalStyles();
+  const body=$("memoModalBody");
+  $("memoModalTitle").textContent=mode==="forward"?"Forward Document":"Document Details";
+  $("memoModalRef").textContent=id;
+  body.innerHTML='<div class="box loading">Loading document...</div>';
+  modal.classList.add("open");
+  document.body.classList.add("modalOpen");
+
+  try{
+    const data=await api({action:"getDocument",id});
+    if(!data||data.result==="error"){
+      body.innerHTML=`<div class="error">${esc(data?.message||data?.error||"Document not found.")}</div>`;
+      return;
+    }
+
+    const d=data.document||data;
+    current=d;
+
+    if(mode==="view"){
+      body.innerHTML=`
+        ${memoPopupFields(d)}
+        ${d.driveLink?`<div class="docLink" style="margin-top:14px"><a href="${esc(d.driveLink)}" target="_blank" rel="noopener">Open Google Drive File</a></div>`:""}
+        ${memoPopupHistory(d)}
+      `;
+      return;
+    }
+
+    body.innerHTML=`
+      ${memoPopupFields(d)}
+      <div class="memoPopupActions">
+        <div class="memoPopupTwo">
+          <div>
+            <label for="memoPopupSec">Forward To Section</label>
+            <select id="memoPopupSec"><option value="">Select Section</option></select>
+          </div>
+          <div>
+            <label for="memoPopupPerson">Personnel</label>
+            <select id="memoPopupPerson"><option value="">Select Personnel</option></select>
+          </div>
+        </div>
+        <label for="memoPopupRemarks">Remarks</label>
+        <textarea id="memoPopupRemarks" rows="3" placeholder="Remarks (optional)"></textarea>
+        <div class="memoPopupButtons">
+          <button type="button" class="memoPopupSecondary" id="memoPopupCancel">Cancel</button>
+          <button type="button" class="memoPopupPrimary" id="memoPopupSubmit">Forward Document</button>
+        </div>
+      </div>
+    `;
+
+    $("memoPopupCancel").onclick=closeMemoModal;
+
+    const sec=$("memoPopupSec");
+    const person=$("memoPopupPerson");
+
+    try{
+      const sections=await api({action:"getSections"});
+      (sections.sections||[]).forEach(x=>{
+        const o=document.createElement("option");
+        o.value=x;o.textContent=x;sec.appendChild(o);
+      });
+    }catch(e){
+      toast(e.message);
+    }
+
+    sec.onchange=async()=>{
+      person.innerHTML='<option value="">Select Personnel</option>';
+      if(!sec.value)return;
+      try{
+        const people=await api({action:"getPersonnel",section:sec.value});
+        (people.personnel||[]).forEach(x=>{
+          const o=document.createElement("option");
+          o.value=x;o.textContent=x;person.appendChild(o);
+        });
+      }catch(e){
+        toast(e.message);
+      }
+    };
+
+    $("memoPopupSubmit").onclick=async()=>{
+      if(!sec.value||!person.value){
+        return toast("Select the section and personnel.");
+      }
+
+      const btn=$("memoPopupSubmit");
+      btn.disabled=true;
+      btn.textContent="Forwarding...";
+
+      try{
+        const result=await apiAction("routeDocument",{
+          id:d.controlRefId,
+          movement:"FORWARD",
+          section:sec.value,
+          personnel:person.value,
+          remarks:$("memoPopupRemarks").value||""
+        });
+
+        if(result?.result==="error"){
+          throw new Error(result.error||result.message||"Movement was not recorded.");
+        }
+
+        closeMemoModal();
+        toast(result.message||"Document forwarded successfully.");
+        await dashboard();
+        await latestMemos();
+      }catch(e){
+        toast(e.message);
+        btn.disabled=false;
+        btn.textContent="Forward Document";
+      }
+    };
+  }catch(e){
+    body.innerHTML=`<div class="error">${esc(e.message)}</div>`;
+  }
 }
 
 async function latestMemos(){
@@ -302,6 +558,10 @@ window.addEventListener("load",()=>{
 });
 
 document.addEventListener("keydown",e=>{
+  if(e.key==="Escape"){
+    closeMemoModal();
+    return;
+  }
   if(e.key!=="Enter")return;
   if(document.activeElement===$("homeId")) $("homeTrack").click();
   if(document.activeElement===$("trackId")) $("trackBtn").click();
