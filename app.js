@@ -331,13 +331,18 @@ function buildRoutingSlipHtml(d){
   .toolbar .printBtn{background:#173b67;color:#fff;border-color:#173b67}
 
   /* The slip itself follows the size and proportions of the supplied sample. */
+  /* A4 print area with two compact routing slips side-by-side at the top. */
   .sheet{
-    width:134.6mm;margin:0 auto;background:#fff;padding:0;
+    width:202mm;margin:0 auto;background:#fff;padding:3mm;
+    display:grid;grid-template-columns:96mm 96mm;gap:4mm;
+    align-items:start;
     box-shadow:0 3px 16px rgba(15,23,42,.18)
   }
+  .slipWrap{width:96mm;height:82mm;overflow:visible;position:relative}
   .slip{
     width:134.6mm;border:1px solid #000;background:#fff;
-    font-family:Arial,Helvetica,sans-serif;font-size:8.4pt;line-height:1.08
+    font-family:Arial,Helvetica,sans-serif;font-size:8.4pt;line-height:1.08;
+    transform:scale(.714);transform-origin:top left;
   }
   .title{
     height:6.8mm;background:#073d70;color:#fff;border-bottom:1px solid #000;
@@ -421,10 +426,10 @@ function buildRoutingSlipHtml(d){
   .bottomBlank div:last-child{border-bottom:0}
 
   @media print{
-    html,body{background:#fff}
+    html,body{background:#fff;width:210mm;min-height:297mm}
     body{padding:0}
     .toolbar{display:none!important}
-    .sheet{margin:0;box-shadow:none}
+    .sheet{width:202mm;margin:0;box-shadow:none;padding:3mm;grid-template-columns:96mm 96mm;gap:4mm}
   }
 </style>
 </head>
@@ -435,7 +440,7 @@ function buildRoutingSlipHtml(d){
   </div>
 
   <div class="sheet">
-    <div class="slip">
+    <div class="slipWrap"><div class="slip">
       <div class="title">RCD ROUTING SLIP</div>
 
       <div class="meta">
@@ -520,7 +525,43 @@ function buildRoutingSlipHtml(d){
           <div></div><div></div><div></div><div></div>
         </div>
       </div>
-    </div>
+    </div></div>
+
+    <div class="slipWrap"><div class="slip">
+      <div class="title">RCD ROUTING SLIP</div>
+
+      <div class="meta">
+        <div class="metaLeft">
+          <div class="metaCell subjectCell">
+            <span class="metaLabel">Subject:</span>
+            <span class="metaValue">${esc(d?.subject||"")}</span>
+          </div>
+          <div class="metaCell controlCell">
+            <span class="metaLabel">Control No.:</span>
+            <span class="metaValue">${esc(d?.controlRefId||"")}</span>
+          </div>
+        </div>
+        <div class="metaRight">
+          <div class="metaCell"><span class="metaLabel">Date:</span><span class="metaValue">${esc(printRoutingSlipDate(receivedAt))}</span></div>
+          <div class="metaCell"><span class="metaLabel">Time In:</span><span class="metaValue">${esc(printRoutingSlipTime(receivedAt))}</span></div>
+          <div class="metaCell"><span class="metaLabel">Prepared by:</span><span class="metaValue">${esc(preparedBy)}</span></div>
+        </div>
+      </div>
+      <div class="blankBand"></div>
+      <table>
+        <colgroup><col class="nrCol"><col class="particularsCol"><col class="initialCol"><col class="dateCol"><col class="actionCol"><col class="remarksCol"></colgroup>
+        <thead><tr><th>NR</th><th>PARTICULARS</th><th>INITIAL</th><th>DATE</th><th>ACTION<br>REQUESTED</th><th>REMARKS / COMMENTS</th></tr></thead>
+        <tbody>${rowHtml}</tbody>
+      </table>
+      <div class="bottom">
+        <div class="legend">
+          <div class="legendTitle">ACTION REQUESTED</div>
+          <div class="legendGrid"><div>A. APPROVAL / SIGNATURE<br>B. APPROPRIATE STAFF ACTION<br>C. COMMENTS AND RECOMMENDATION<br>D. REPLY DIRECT TO WRITER<br>E. REPLY FOR SIG OF RD<br>F. ATTN TO HWI/HWN INSIDE<br>G. REWRITE/RETYPE</div><div>H. STUDY REVIEW/INVESTIGATE<br>I. NOTABLE INFORMATION<br>J. REFERENCE FILE<br>K. DISPATCH<br>L. WIDEST DISSEMINATION<br>M. SEE REMARKS / INSTRUCTIONS<br>N. SEE ME</div></div>
+          <div class="legendFooter">(Indicate Letter Only)</div>
+        </div>
+        <div class="bottomBlank"><div></div><div></div><div></div><div></div></div>
+      </div>
+    </div></div>
   </div>
 </body>
 </html>`;
