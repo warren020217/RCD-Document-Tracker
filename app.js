@@ -1,5 +1,7 @@
 let API_URL=(window.RCD_CONFIG||{}).API_URL||localStorage.getItem("RCD_API_URL")||"/api/rcd";
 let current=null,scanner=null,jsonpCounter=0;
+const selectedMemoIds=new Set();
+const memoDataById=new Map();
 
 const $=id=>document.getElementById(id);
 const esc=v=>String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
@@ -187,6 +189,7 @@ function formatMemoDate(value){
 }
 
 function renderLatestMemos(data){
+  injectLatestMemoStyles();
   const target=$("latestMemos");
   if(!target)return;
 
@@ -201,7 +204,6 @@ function renderLatestMemos(data){
     return;
   }
 
-  // Keep newest records first even if the API response order changes.
   rows=rows.map((d,index)=>({...d,__index:index})).sort((a,b)=>{
     const ad=new Date(a.dateLogged||a.dateReceived||a.createdAt||0).getTime();
     const bd=new Date(b.dateLogged||b.dateReceived||b.createdAt||0).getTime();
@@ -209,33 +211,118 @@ function renderLatestMemos(data){
     return a.__index-b.__index;
   }).slice(0,20);
 
-  target.innerHTML=rows.map(d=>`
-    <div class="memoItem">
-      <div class="memoMain">
-        <div class="memoRef">${esc(d.controlRefId||"")}</div>
-        <div class="memoSubject">${esc(d.subject||"Untitled Memo")}</div>
-        <div class="memoMeta">
-          ${esc(d.originatingOffice||"")} ${d.dateLogged?`· ${esc(formatMemoDate(d.dateLogged))}`:""}
-        </div>
+  rows.forEach(d=>{
+    const id=String(d.controlRefId||"").trim();
+    if(id)memoDataById.set(id,d);
+  });
+
+  // Keep selections only for memos still present in the current list.
+  const visibleIds=new Set(rows.map(d=>String(d.controlRefId||"").trim()).filter(Boolean));
+  [...selectedMemoIds].forEach(id=>{if(!visibleIds.has(id))selectedMemoIds.delete(id)});
+
+  const count=selectedMemoIds.size;
+  const batchBar=count?`
+    <div class="memoBatchBar">
+      <div class="memoBatchInfo"><b>${count}</b> memo${count===1?"":"s"} selected</div>
+      <div class="memoBatchActions">
+        <button type="button" class="memoBatchBtn" id="batchForwardBtn">Forward Selected</button>
+        <button type="button" class="memoBatchBtn" id="batchPrintBtn">Print Routing Slip</button>
+        <button type="button" class="memoBatchClear" id="batchClearBtn">Clear</button>
       </div>
-      <div class="memoActions">
-        <button class="memoForward" type="button" data-memo-id="${esc(d.controlRefId||"")}" data-memo-action="view">View</button>
-        <button class="memoForward" type="button" data-memo-id="${esc(d.controlRefId||"")}" data-memo-action="forward">Forward</button>
-        <button class="memoForward" type="button" data-memo-id="${esc(d.controlRefId||"")}" data-memo-action="print">Print Routing Slip</button>
-      </div>
+    </div>` : "";
+
+  const allChecked=rows.length>0&&rows.every(d=>selectedMemoIds.has(String(d.controlRefId||"").trim()));
+
+  target.innerHTML=`${batchBar}
+    <div class="memoSelectAllRow">
+      <label><input type="checkbox" id="latestSelectAll" ${allChecked?'checked':''}> Select all visible</label>
+      ${count?`<span>${count} selected</span>`:""}
     </div>
-  `).join("");
+    ${rows.map(d=>{
+      const id=String(d.controlRefId||"").trim();
+      const selected=selectedMemoIds.has(id);
+      return `<div class="memoItem ${selected?'memoItemSelected':''}">
+        <div class="memoCheckWrap">
+          <input type="checkbox" class="memoSelect" data-memo-id="${esc(id)}" ${selected?'checked':''} aria-label="Select ${esc(id)}">
+        </div>
+        <div class="memoMain">
+          <div class="memoRef">${esc(id)}</div>
+          <div class="memoSubject">${esc(d.subject||"Untitled Memo")}</div>
+          <div class="memoMeta">
+            ${esc(d.originatingOffice||"")} ${d.dateLogged?`· ${esc(formatMemoDate(d.dateLogged))}`:""}
+          </div>
+        </div>
+        <div class="memoActions">
+          ${selected?"":`<button class="memoForward" type="button" data-memo-id="${esc(id)}" data-memo-action="view">View</button>`}
+          <button class="memoForward" type="button" data-memo-id="${esc(id)}" data-memo-action="forward">Forward</button>
+          <button class="memoForward" type="button" data-memo-id="${esc(id)}" data-memo-action="print">Print Routing Slip</button>
+        </div>
+      </div>`;
+    }).join("")}`;
+
+  target.querySelectorAll(".memoSelect").forEach(box=>{
+    box.addEventListener("change",()=>{
+      const id=box.dataset.memoId||"";
+      if(box.checked)selectedMemoIds.add(id);else selectedMemoIds.delete(id);
+      renderLatestMemos({result:"success",documents:rows});
+    });
+  });
+
+  $("latestSelectAll")?.addEventListener("change",e=>{
+    const checked=e.target.checked;
+    rows.forEach(d=>{
+      const id=String(d.controlRefId||"").trim();
+      if(!id)return;
+      if(checked)selectedMemoIds.add(id);else selectedMemoIds.delete(id);
+    });
+    renderLatestMemos({result:"success",documents:rows});
+  });
+
+  $("batchClearBtn")?.addEventListener("click",()=>{
+    selectedMemoIds.clear();
+    renderLatestMemos({result:"success",documents:rows});
+  });
+
+  $("batchForwardBtn")?.addEventListener("click",()=>openBatchForwardModal([...selectedMemoIds]));
+  $("batchPrintBtn")?.addEventListener("click",()=>printSelectedRoutingSlips([...selectedMemoIds]));
 
   target.querySelectorAll(".memoForward").forEach(btn=>{
     btn.addEventListener("click",()=>{
       const id=btn.dataset.memoId||"";
       const mode=btn.dataset.memoAction||"view";
-      if(mode==="print") printRoutingSlip(id);
+      if(mode==="print") printSelectedRoutingSlips(selectedMemoIds.size ? [...selectedMemoIds] : [id]);
       else openMemoModal(id,mode);
     });
   });
 }
 
+function injectLatestMemoStyles(){
+  if($("latestMemoStyles"))return;
+  const style=document.createElement("style");
+  style.id="latestMemoStyles";
+  style.textContent=`
+    .memoBatchBar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:11px 0 13px;margin-bottom:4px;border-bottom:1px solid #e2e8f0}
+    .memoBatchInfo{color:#173b67;font-size:14px}
+    .memoBatchActions{display:flex;gap:8px;flex-wrap:wrap}
+    .memoBatchBtn,.memoBatchClear{appearance:none;border:1px solid #cbd5e1;border-radius:9px;background:#fff;color:#173b67;font:600 13px Arial,sans-serif;padding:8px 12px;cursor:pointer}
+    .memoBatchBtn{background:#173b67;color:#fff;border-color:#173b67}
+    .memoBatchClear{color:#64748b}
+    .memoSelectAllRow{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0 9px;color:#64748b;font-size:12px}
+    .memoSelectAllRow label{display:flex;align-items:center;gap:7px;cursor:pointer}
+    .memoSelectAllRow input,.memoSelect{width:17px;height:17px;accent-color:#173b67;cursor:pointer}
+    .memoItem{display:flex;align-items:center;gap:10px}
+    .memoCheckWrap{flex:0 0 24px;display:flex;align-items:center;justify-content:center}
+    .memoItemSelected{background:#f4f8fc}
+    .memoItemSelected .memoSubject{color:#173b67}
+    @media(max-width:650px){
+      .memoItem{align-items:flex-start;flex-wrap:wrap}
+      .memoCheckWrap{padding-top:3px}
+      .memoMain{flex:1 1 calc(100% - 40px)}
+      .memoActions{width:100%;margin-left:34px;justify-content:flex-start}
+    }
+  `;
+  document.head.appendChild(style);
+}
 
 
 function getReceivedRecord(d){
@@ -295,12 +382,11 @@ function routingSlipRows(d){
   return rows;
 }
 
-function buildRoutingSlipHtml(d){
+function buildSingleRoutingSlipHtml(d){
   const received=getReceivedRecord(d);
   const receivedAt=received?.dateTime||d?.dateReceived||d?.dateLogged||"";
   const preparedBy=received?.personnel||received?.receivedBy||d?.receivedBy||d?.currentPersonnel||"";
   const rows=routingSlipRows(d);
-
   const rowHtml=rows.map(r=>`<tr>
     <td class="nr">${esc(r.nr)}</td>
     <td class="particulars">${esc(r.name)}</td>
@@ -310,12 +396,49 @@ function buildRoutingSlipHtml(d){
     <td class="remarks">${esc(r.remarks||"")}</td>
   </tr>`).join("");
 
+  return `<div class="slip">
+    <div class="title">RCD ROUTING SLIP</div>
+    <div class="meta">
+      <div class="metaLeft">
+        <div class="metaCell subjectCell"><span class="metaLabel">Subject:</span><span class="metaValue">${esc(d?.subject||"")}</span></div>
+        <div class="metaCell controlCell"><span class="metaLabel">Control No.:</span><span class="metaValue">${esc(d?.controlRefId||"")}</span></div>
+      </div>
+      <div class="metaRight">
+        <div class="metaCell"><span class="metaLabel">Date:</span><span class="metaValue">${esc(printRoutingSlipDate(receivedAt))}</span></div>
+        <div class="metaCell"><span class="metaLabel">Time In:</span><span class="metaValue">${esc(printRoutingSlipTime(receivedAt))}</span></div>
+        <div class="metaCell"><span class="metaLabel">Prepared by:</span><span class="metaValue">${esc(preparedBy)}</span></div>
+      </div>
+    </div>
+    <div class="blankBand"></div>
+    <table>
+      <colgroup><col class="nrCol"><col class="particularsCol"><col class="initialCol"><col class="dateCol"><col class="actionCol"><col class="remarksCol"></colgroup>
+      <thead><tr><th>NR</th><th>PARTICULARS</th><th>INITIAL</th><th>DATE</th><th>ACTION<br>REQUESTED</th><th>REMARKS / COMMENTS</th></tr></thead>
+      <tbody>${rowHtml}</tbody>
+    </table>
+    <div class="bottom">
+      <div class="legend">
+        <div class="legendTitle">ACTION REQUESTED</div>
+        <div class="legendGrid">
+          <div>A. APPROVAL / SIGNATURE<br>B. APPROPRIATE STAFF ACTION<br>C. COMMENTS AND RECOMMENDATION<br>D. REPLY DIRECT TO WRITER<br>E. REPLY FOR SIG OF RD<br>F. ATTN TO HWI/HWN INSIDE<br>G. REWRITE/RETYPE</div>
+          <div>H. STUDY REVIEW/INVESTIGATE<br>I. NOTABLE INFORMATION<br>J. REFERENCE FILE<br>K. DISPATCH<br>L. WIDEST DISSEMINATION<br>M. SEE REMARKS / INSTRUCTIONS<br>N. SEE ME</div>
+        </div>
+        <div class="legendFooter">(Indicate Letter Only)</div>
+      </div>
+      <div class="bottomBlank"><div></div><div></div><div></div><div></div></div>
+    </div>
+  </div>`;
+}
+
+function buildRoutingSlipHtml(documents){
+  const docs=Array.isArray(documents)?documents:[documents];
+  const slips=docs.filter(Boolean).map(d=>buildSingleRoutingSlipHtml(d)).join("");
+
   return `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RCD Routing Slip - ${esc(d?.controlRefId||"")}</title>
+<title>RCD Routing Slip${docs.length>1?"s":""}</title>
 <style>
   @page{size:A4 portrait;margin:0}
   *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
@@ -324,38 +447,26 @@ function buildRoutingSlipHtml(d){
   .toolbar{width:min(900px,100%);margin:0 auto 12px;display:flex;justify-content:flex-end;gap:8px}
   .toolbar button{appearance:none;border:1px solid #cbd5e1;border-radius:9px;background:#fff;color:#173b67;font:600 14px Arial,sans-serif;padding:9px 16px;cursor:pointer}
   .toolbar .printBtn{background:#173b67;color:#fff;border-color:#173b67}
-
-  /* Two complete compact slips, side-by-side, at the top of one A4 sheet. */
-  .sheet{width:202mm;margin:0 auto;background:#fff;padding:3mm;display:grid;grid-template-columns:96mm 96mm;gap:4mm;align-items:start;box-shadow:0 3px 16px rgba(15,23,42,.18)}
-  .slipWrap{width:96mm;position:relative}
-  .slip{width:96mm;border:1px solid #000;background:#fff;font-family:Arial,Helvetica,sans-serif;font-size:5.9pt;line-height:1.03;overflow:hidden}
+  .sheet{width:202mm;margin:0 auto;background:#fff;padding:3mm;display:grid;grid-template-columns:96mm 96mm;grid-auto-rows:max-content;gap:4mm;align-items:start;box-shadow:0 3px 16px rgba(15,23,42,.18)}
+  .slip{width:96mm;border:1px solid #000;background:#fff;font-family:Arial,Helvetica,sans-serif;font-size:5.9pt;line-height:1.03;overflow:hidden;break-inside:avoid}
   .title{height:5mm;background:#073d70 !important;color:#fff !important;border-bottom:1px solid #000;text-align:center;font-size:9.5pt;font-weight:700;letter-spacing:.15px;padding:.7mm;-webkit-print-color-adjust:exact;print-color-adjust:exact}
   .meta{display:grid;grid-template-columns:1fr 1.04fr;border-bottom:1px solid #000}
-  .metaLeft{border-right:1px solid #000}
-  .metaCell{min-height:5.8mm;border-bottom:1px solid #000;padding:.55mm .8mm;font-size:5.8pt;display:flex;align-items:flex-start;gap:.8mm}
-  .metaCell:last-child{border-bottom:0}
-  .subjectCell{min-height:6.8mm}.controlCell{min-height:5.8mm}
-  .metaRight .metaCell{display:flex;align-items:flex-start}
-  .metaLabel{font-weight:400;white-space:nowrap}.metaValue{font-weight:600;flex:1;overflow-wrap:anywhere;word-break:break-word}
+  .metaLeft{border-right:1px solid #000}.metaCell{min-height:5.8mm;border-bottom:1px solid #000;padding:.55mm .8mm;font-size:5.8pt;display:flex;align-items:flex-start;gap:.8mm}.metaCell:last-child{border-bottom:0}.subjectCell{min-height:6.8mm}.controlCell{min-height:5.8mm}.metaRight .metaCell{display:flex;align-items:flex-start}.metaLabel{font-weight:400;white-space:nowrap}.metaValue{font-weight:600;flex:1;overflow-wrap:anywhere;word-break:break-word}
   .blankBand{height:3.2mm;border-bottom:1px solid #000}
-  table{width:100%;border-collapse:collapse;table-layout:fixed}
-  col.nrCol{width:5.5mm}.particularsCol{width:21mm}.initialCol{width:9mm}.dateCol{width:11mm}.actionCol{width:18mm}.remarksCol{width:31.5mm}
-  th{height:8.8mm;background:#073d70 !important;color:#fff !important;font-size:6.3pt;font-weight:700;text-align:center;padding:.6mm .3mm;border-right:1px solid #fff;border-bottom:1px solid #000;vertical-align:middle;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-  th:last-child{border-right:0}
-  td{height:4.4mm;border-right:1px solid #000;border-bottom:1px solid #000;padding:.35mm .55mm;vertical-align:middle;overflow-wrap:anywhere;word-break:break-word}
-  td:last-child{border-right:0}
+  table{width:100%;border-collapse:collapse;table-layout:fixed} col.nrCol{width:5.5mm}.particularsCol{width:21mm}.initialCol{width:9mm}.dateCol{width:11mm}.actionCol{width:18mm}.remarksCol{width:31.5mm}
+  th{height:8.8mm;background:#073d70 !important;color:#fff !important;font-size:6.3pt;font-weight:700;text-align:center;padding:.6mm .3mm;border-right:1px solid #fff;border-bottom:1px solid #000;vertical-align:middle;-webkit-print-color-adjust:exact;print-color-adjust:exact} th:last-child{border-right:0}
+  td{height:4.4mm;border-right:1px solid #000;border-bottom:1px solid #000;padding:.35mm .55mm;vertical-align:middle;overflow-wrap:anywhere;word-break:break-word} td:last-child{border-right:0}
   td.nr{text-align:center}td.particulars{font-size:5.8pt}td.initial{text-align:center;font-size:5.2pt}td.date{text-align:center;font-size:4.8pt}td.action{text-align:center;font-size:4.9pt}td.remarks{font-size:4.8pt}
-  .bottom{display:grid;grid-template-columns:1fr 38mm;min-height:19.5mm}
-  .legend{border-right:1px solid #000;padding:1mm 1.8mm .7mm;font-size:3.7pt;line-height:1.2}
-  .legendGrid{display:grid;grid-template-columns:1fr 1fr;gap:0 1.5mm}.legendTitle{text-align:center;font-weight:700;font-size:4.1pt;margin-bottom:.6mm}.legendFooter{text-align:center;margin-top:.6mm;font-size:3.4pt}
-  .bottomBlank{display:grid;grid-template-rows:repeat(4,1fr)}.bottomBlank div{border-bottom:1px solid #000}.bottomBlank div:last-child{border-bottom:0}
-
+  .bottom{display:grid;grid-template-columns:1fr 38mm;min-height:19.5mm}.legend{border-right:1px solid #000;padding:1mm 1.8mm .7mm;font-size:3.7pt;line-height:1.2}.legendGrid{display:grid;grid-template-columns:1fr 1fr;gap:0 1.5mm}.legendTitle{text-align:center;font-weight:700;font-size:4.1pt;margin-bottom:.6mm}.legendFooter{text-align:center;margin-top:.6mm;font-size:3.4pt}.bottomBlank{display:grid;grid-template-rows:repeat(4,1fr)}.bottomBlank div{border-bottom:1px solid #000}.bottomBlank div:last-child{border-bottom:0}
   @media print{
     html,body{background:#fff;width:210mm;min-height:297mm}
     body{padding:0}
     .toolbar{display:none!important}
     .sheet{width:202mm;margin:0;padding:3mm;grid-template-columns:96mm 96mm;gap:4mm;box-shadow:none}
-    .slip,.title,th{ -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
+    .slip{break-inside:avoid;page-break-inside:avoid}
+    .slip:nth-child(8n+1){break-before:auto}
+    .slip:nth-child(8n+9){break-before:page}
+    .slip,.title,th{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important}
   }
 </style>
 </head>
@@ -364,150 +475,43 @@ function buildRoutingSlipHtml(d){
     <button type="button" onclick="window.close()">Close</button>
     <button type="button" class="printBtn" onclick="window.print()">Print Routing Slip</button>
   </div>
-
-  <div class="sheet">
-    <div class="slipWrap"><div class="slip">
-      <div class="title">RCD ROUTING SLIP</div>
-
-      <div class="meta">
-        <div class="metaLeft">
-          <div class="metaCell subjectCell">
-            <span class="metaLabel">Subject:</span>
-            <span class="metaValue">${esc(d?.subject||"")}</span>
-          </div>
-          <div class="metaCell controlCell">
-            <span class="metaLabel">Control No.:</span>
-            <span class="metaValue">${esc(d?.controlRefId||"")}</span>
-          </div>
-        </div>
-
-        <div class="metaRight">
-          <div class="metaCell">
-            <span class="metaLabel">Date:</span>
-            <span class="metaValue">${esc(printRoutingSlipDate(receivedAt))}</span>
-          </div>
-          <div class="metaCell">
-            <span class="metaLabel">Time In:</span>
-            <span class="metaValue">${esc(printRoutingSlipTime(receivedAt))}</span>
-          </div>
-          <div class="metaCell">
-            <span class="metaLabel">Prepared by:</span>
-            <span class="metaValue">${esc(preparedBy)}</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="blankBand"></div>
-
-      <table>
-        <colgroup>
-          <col class="nrCol">
-          <col class="particularsCol">
-          <col class="initialCol">
-          <col class="dateCol">
-          <col class="actionCol">
-          <col class="remarksCol">
-        </colgroup>
-        <thead>
-          <tr>
-            <th>NR</th>
-            <th>PARTICULARS</th>
-            <th>INITIAL</th>
-            <th>DATE</th>
-            <th>ACTION<br>REQUESTED</th>
-            <th>REMARKS / COMMENTS</th>
-          </tr>
-        </thead>
-        <tbody>${rowHtml}</tbody>
-      </table>
-
-      <div class="bottom">
-        <div class="legend">
-          <div class="legendTitle">ACTION REQUESTED</div>
-          <div class="legendGrid">
-            <div>
-              A. APPROVAL / SIGNATURE<br>
-              B. APPROPRIATE STAFF ACTION<br>
-              C. COMMENTS AND RECOMMENDATION<br>
-              D. REPLY DIRECT TO WRITER<br>
-              E. REPLY FOR SIG OF RD<br>
-              F. ATTN TO HWI/HWN INSIDE<br>
-              G. REWRITE/RETYPE
-            </div>
-            <div>
-              H. STUDY REVIEW/INVESTIGATE<br>
-              I. NOTABLE INFORMATION<br>
-              J. REFERENCE FILE<br>
-              K. DISPATCH<br>
-              L. WIDEST DISSEMINATION<br>
-              M. SEE REMARKS / INSTRUCTIONS<br>
-              N. SEE ME
-            </div>
-          </div>
-          <div class="legendFooter">(Indicate Letter Only)</div>
-        </div>
-
-        <div class="bottomBlank">
-          <div></div><div></div><div></div><div></div>
-        </div>
-      </div>
-    </div></div>
-
-    <div class="slipWrap"><div class="slip">
-      <div class="title">RCD ROUTING SLIP</div>
-
-      <div class="meta">
-        <div class="metaLeft">
-          <div class="metaCell subjectCell">
-            <span class="metaLabel">Subject:</span>
-            <span class="metaValue">${esc(d?.subject||"")}</span>
-          </div>
-          <div class="metaCell controlCell">
-            <span class="metaLabel">Control No.:</span>
-            <span class="metaValue">${esc(d?.controlRefId||"")}</span>
-          </div>
-        </div>
-        <div class="metaRight">
-          <div class="metaCell"><span class="metaLabel">Date:</span><span class="metaValue">${esc(printRoutingSlipDate(receivedAt))}</span></div>
-          <div class="metaCell"><span class="metaLabel">Time In:</span><span class="metaValue">${esc(printRoutingSlipTime(receivedAt))}</span></div>
-          <div class="metaCell"><span class="metaLabel">Prepared by:</span><span class="metaValue">${esc(preparedBy)}</span></div>
-        </div>
-      </div>
-      <div class="blankBand"></div>
-      <table>
-        <colgroup><col class="nrCol"><col class="particularsCol"><col class="initialCol"><col class="dateCol"><col class="actionCol"><col class="remarksCol"></colgroup>
-        <thead><tr><th>NR</th><th>PARTICULARS</th><th>INITIAL</th><th>DATE</th><th>ACTION<br>REQUESTED</th><th>REMARKS / COMMENTS</th></tr></thead>
-        <tbody>${rowHtml}</tbody>
-      </table>
-      <div class="bottom">
-        <div class="legend">
-          <div class="legendTitle">ACTION REQUESTED</div>
-          <div class="legendGrid"><div>A. APPROVAL / SIGNATURE<br>B. APPROPRIATE STAFF ACTION<br>C. COMMENTS AND RECOMMENDATION<br>D. REPLY DIRECT TO WRITER<br>E. REPLY FOR SIG OF RD<br>F. ATTN TO HWI/HWN INSIDE<br>G. REWRITE/RETYPE</div><div>H. STUDY REVIEW/INVESTIGATE<br>I. NOTABLE INFORMATION<br>J. REFERENCE FILE<br>K. DISPATCH<br>L. WIDEST DISSEMINATION<br>M. SEE REMARKS / INSTRUCTIONS<br>N. SEE ME</div></div>
-          <div class="legendFooter">(Indicate Letter Only)</div>
-        </div>
-        <div class="bottomBlank"><div></div><div></div><div></div><div></div></div>
-      </div>
-    </div></div>
-  </div>
+  <div class="sheet">${slips}</div>
 </body>
 </html>`;
 }
 
-function formatRoutingDate(value){
-  if(value===undefined||value===null||value==="") return "";
-  const d=new Date(value);
-  if(!Number.isNaN(d.getTime())){
-    return d.toLocaleDateString("en-PH",{month:"2-digit",day:"2-digit",year:"numeric"});
+async function fetchDocumentsByIds(ids){
+  const clean=[...new Set((ids||[]).map(x=>String(x||"").trim()).filter(Boolean))];
+  const docs=[];
+  for(const id of clean){
+    const cached=memoDataById.get(id);
+    try{
+      const data=await api({action:"getDocument",id});
+      if(data&&!data.result){
+        const d=data.document||data;
+        memoDataById.set(id,d);
+        docs.push(d);
+      }else if(cached){
+        docs.push(cached);
+      }
+    }catch(e){
+      if(cached)docs.push(cached);
+      else throw e;
+    }
   }
-  return String(value);
+  return docs;
 }
 
 async function printRoutingSlip(id){
   id=(id||"").trim();
   if(!id)return toast("Control Ref ID is missing.");
+  return printSelectedRoutingSlips([id]);
+}
 
-  // Open the popup immediately while the click is still a trusted user action.
-  // This prevents the browser from blocking it while the API request is loading.
+async function printSelectedRoutingSlips(ids){
+  const clean=[...new Set((ids||[]).map(x=>String(x||"").trim()).filter(Boolean))];
+  if(!clean.length)return toast("Select at least one memo to print.");
+
   const win=window.open("about:blank","_blank","width=900,height=900");
   if(!win){
     toast("Please allow pop-ups to open the routing slip.");
@@ -516,49 +520,100 @@ async function printRoutingSlip(id){
 
   try{
     win.document.open();
-    win.document.write(`
-      <!doctype html>
-      <html>
-        <head><title>RCD Routing Slip</title></head>
-        <body style="margin:0;background:#eef1f5;font-family:Arial,sans-serif">
-          <div style="padding:30px;text-align:center;color:#173b67;font-weight:600">
-            Loading routing slip...
-          </div>
-        </body>
-      </html>
-    `);
+    win.document.write(`<!doctype html><html><head><title>RCD Routing Slip</title></head><body style="margin:0;background:#eef1f5;font-family:Arial,sans-serif"><div style="padding:30px;text-align:center;color:#173b67;font-weight:600">Loading ${clean.length} routing slip${clean.length===1?"":"s"}...</div></body></html>`);
     win.document.close();
     win.focus();
 
-    const data=await api({action:"getDocument",id});
-    if(!data||data.result==="error"){
-      throw new Error(data?.message||data?.error||"Document not found.");
-    }
+    const docs=await fetchDocumentsByIds(clean);
+    if(!docs.length)throw new Error("No selected memo could be loaded.");
 
-    const d=data.document||data;
-    const html=buildRoutingSlipHtml(d);
-
-    // Replace the temporary page without navigating away from the popup.
     win.document.open();
-    win.document.write(html);
+    win.document.write(buildRoutingSlipHtml(docs));
     win.document.close();
     win.focus();
   }catch(e){
     try{
       win.document.open();
-      win.document.write(`
-        <!doctype html>
-        <html><body style="font-family:Arial,sans-serif;padding:24px">
-          <h3 style="color:#b91c1c">Unable to load routing slip</h3>
-          <p>${esc(e.message)}</p>
-          <button onclick="window.close()">Close</button>
-        </body></html>
-      `);
+      win.document.write(`<!doctype html><html><body style="font-family:Arial,sans-serif;padding:24px"><h3 style="color:#b91c1c">Unable to load routing slip</h3><p>${esc(e.message)}</p><button onclick="window.close()">Close</button></body></html>`);
       win.document.close();
-    }catch(_){}
+    }catch(_){ }
     toast("Unable to load routing slip: "+e.message);
   }
 }
+
+async function openBatchForwardModal(ids){
+  const clean=[...new Set((ids||[]).map(x=>String(x||"").trim()).filter(Boolean))];
+  if(!clean.length)return toast("Select at least one memo to forward.");
+
+  const modal=ensureMemoModal();
+  injectMemoModalStyles();
+  const body=$("memoModalBody");
+  $("memoModalTitle").textContent="Forward Selected Memos";
+  $("memoModalRef").textContent=`${clean.length} memo${clean.length===1?"":"s"} selected`;
+  modal.classList.add("open");
+  document.body.classList.add("modalOpen");
+  body.innerHTML=`
+    <div class="memoBatchForwardNotice"><b>${clean.length}</b> selected memo${clean.length===1?"":"s"} will be forwarded to the same section and personnel.</div>
+    <div class="memoPopupActions">
+      <div class="memoPopupTwo">
+        <div><label for="batchForwardSec">Forward To Section</label><select id="batchForwardSec"><option value="">Select Section</option></select></div>
+        <div><label for="batchForwardPerson">Personnel</label><select id="batchForwardPerson"><option value="">Select Personnel</option></select></div>
+      </div>
+      <label for="batchForwardRemarks">Remarks</label>
+      <textarea id="batchForwardRemarks" rows="3" placeholder="Remarks (optional)"></textarea>
+      <div class="memoPopupButtons">
+        <button type="button" class="memoPopupSecondary" id="batchForwardCancel">Cancel</button>
+        <button type="button" class="memoPopupPrimary" id="batchForwardSubmit">Forward ${clean.length} Memo${clean.length===1?"":"s"}</button>
+      </div>
+    </div>`;
+
+  $("batchForwardCancel").onclick=closeMemoModal;
+  const sec=$("batchForwardSec"),person=$("batchForwardPerson");
+
+  try{
+    const sections=await api({action:"getSections"});
+    (sections.sections||[]).forEach(x=>{
+      const o=document.createElement("option");o.value=x;o.textContent=x;sec.appendChild(o);
+    });
+  }catch(e){toast(e.message);return;}
+
+  sec.onchange=async()=>{
+    person.innerHTML='<option value="">Select Personnel</option>';
+    if(!sec.value)return;
+    try{
+      const people=await api({action:"getPersonnel",section:sec.value});
+      (people.personnel||[]).forEach(x=>{
+        const o=document.createElement("option");o.value=x;o.textContent=x;person.appendChild(o);
+      });
+    }catch(e){toast(e.message);}
+  };
+
+  $("batchForwardSubmit").onclick=async()=>{
+    if(!sec.value||!person.value)return toast("Select the section and personnel.");
+    const btn=$("batchForwardSubmit");
+    btn.disabled=true;
+    btn.textContent="Forwarding...";
+    try{
+      let done=0;
+      const remarks=$("batchForwardRemarks").value||"";
+      for(const id of clean){
+        const result=await apiAction("routeDocument",{id,movement:"FORWARD",section:sec.value,personnel:person.value,remarks});
+        if(result?.result==="error")throw new Error(result.error||result.message||`Failed to forward ${id}.`);
+        done++;
+      }
+      selectedMemoIds.clear();
+      closeMemoModal();
+      toast(`${done} memo${done===1?"":"s"} forwarded successfully.`);
+      await dashboard();
+      await latestMemos();
+    }catch(e){
+      toast(e.message);
+      btn.disabled=false;
+      btn.textContent=`Forward ${clean.length} Memo${clean.length===1?"":"s"}`;
+    }
+  };
+}
+
 
 function ensureMemoModal(){
   let modal=$("memoModal");
@@ -618,6 +673,7 @@ function injectMemoModalStyles(){
     }
     .memoForward:hover{background:#f4f7fa;border-color:#b8c5d4}
     .memoForward:active{transform:translateY(1px)}
+    .memoBatchForwardNotice{padding:12px 14px;border:1px solid #dbe5ef;border-radius:10px;background:#f8fafc;color:#334155;margin-bottom:14px}
     .memoModal{position:fixed;inset:0;z-index:9999;display:none}
     .memoModal.open{display:block}
     .memoModalBackdrop{position:absolute;inset:0;background:rgba(15,23,42,.48)}
