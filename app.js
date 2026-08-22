@@ -318,118 +318,44 @@ function buildRoutingSlipHtml(d){
 <title>RCD Routing Slip - ${esc(d?.controlRefId||"")}</title>
 <style>
   @page{size:A4 portrait;margin:0}
-  *{box-sizing:border-box}
+  *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
   html,body{margin:0;padding:0;background:#eef1f5;color:#000;font-family:Arial,Helvetica,sans-serif}
   body{min-height:100vh;padding:18px}
-  .toolbar{
-    width:min(900px,100%);margin:0 auto 12px;display:flex;justify-content:flex-end;gap:8px
-  }
-  .toolbar button{
-    appearance:none;border:1px solid #cbd5e1;border-radius:9px;background:#fff;
-    color:#173b67;font:600 14px Arial,sans-serif;padding:9px 16px;cursor:pointer
-  }
+  .toolbar{width:min(900px,100%);margin:0 auto 12px;display:flex;justify-content:flex-end;gap:8px}
+  .toolbar button{appearance:none;border:1px solid #cbd5e1;border-radius:9px;background:#fff;color:#173b67;font:600 14px Arial,sans-serif;padding:9px 16px;cursor:pointer}
   .toolbar .printBtn{background:#173b67;color:#fff;border-color:#173b67}
 
-  /* The slip itself follows the size and proportions of the supplied sample. */
-  /* A4 print area with two compact routing slips side-by-side at the top. */
-  .sheet{
-    width:202mm;margin:0 auto;background:#fff;padding:3mm;
-    display:grid;grid-template-columns:96mm 96mm;gap:4mm;
-    align-items:start;
-    box-shadow:0 3px 16px rgba(15,23,42,.18)
-  }
-  .slipWrap{width:96mm;height:82mm;overflow:visible;position:relative}
-  .slip{
-    width:134.6mm;border:1px solid #000;background:#fff;
-    font-family:Arial,Helvetica,sans-serif;font-size:8.4pt;line-height:1.08;
-    transform:scale(.714);transform-origin:top left;
-  }
-  .title{
-    height:6.8mm;background:#073d70;color:#fff;border-bottom:1px solid #000;
-    text-align:center;font-size:13pt;font-weight:700;letter-spacing:.2px;padding:1mm
-  }
-
-  .meta{
-    display:grid;
-    grid-template-columns:1fr 1.04fr;
-    border-bottom:1px solid #000;
-  }
+  /* Two complete compact slips, side-by-side, at the top of one A4 sheet. */
+  .sheet{width:202mm;margin:0 auto;background:#fff;padding:3mm;display:grid;grid-template-columns:96mm 96mm;gap:4mm;align-items:start;box-shadow:0 3px 16px rgba(15,23,42,.18)}
+  .slipWrap{width:96mm;position:relative}
+  .slip{width:96mm;border:1px solid #000;background:#fff;font-family:Arial,Helvetica,sans-serif;font-size:5.9pt;line-height:1.03;overflow:hidden}
+  .title{height:5mm;background:#073d70 !important;color:#fff !important;border-bottom:1px solid #000;text-align:center;font-size:9.5pt;font-weight:700;letter-spacing:.15px;padding:.7mm;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .meta{display:grid;grid-template-columns:1fr 1.04fr;border-bottom:1px solid #000}
   .metaLeft{border-right:1px solid #000}
-  .metaCell{
-    min-height:7mm;border-bottom:1px solid #000;
-    padding:.8mm 1.1mm;font-size:8.5pt;
-    display:flex;align-items:flex-start;gap:1.5mm;
-  }
+  .metaCell{min-height:5.8mm;border-bottom:1px solid #000;padding:.55mm .8mm;font-size:5.8pt;display:flex;align-items:flex-start;gap:.8mm}
   .metaCell:last-child{border-bottom:0}
-  .subjectCell{min-height:8.2mm}
-  .controlCell{min-height:8.2mm}
+  .subjectCell{min-height:6.8mm}.controlCell{min-height:5.8mm}
   .metaRight .metaCell{display:flex;align-items:flex-start}
-  .metaLabel{font-weight:400;white-space:nowrap}
-  .metaValue{font-weight:600;flex:1;overflow-wrap:anywhere;word-break:break-word}
-
-  .blankBand{height:5mm;border-bottom:1px solid #000}
-
-  table{
-    width:100%;
-    border-collapse:collapse;
-    table-layout:fixed;
-  }
-  col.nrCol{width:8mm}
-  col.particularsCol{width:33mm}
-  col.initialCol{width:13mm}
-  col.dateCol{width:16mm}
-  col.actionCol{width:25mm}
-  col.remarksCol{width:39.6mm}
-
-  th{
-    height:12mm;
-    background:#073d70;color:#fff;
-    font-size:8.7pt;font-weight:700;text-align:center;
-    padding:1.2mm .7mm;
-    border-right:1px solid #fff;border-bottom:1px solid #000;
-    vertical-align:middle;
-  }
+  .metaLabel{font-weight:400;white-space:nowrap}.metaValue{font-weight:600;flex:1;overflow-wrap:anywhere;word-break:break-word}
+  .blankBand{height:3.2mm;border-bottom:1px solid #000}
+  table{width:100%;border-collapse:collapse;table-layout:fixed}
+  col.nrCol{width:5.5mm}.particularsCol{width:21mm}.initialCol{width:9mm}.dateCol{width:11mm}.actionCol{width:18mm}.remarksCol{width:31.5mm}
+  th{height:8.8mm;background:#073d70 !important;color:#fff !important;font-size:6.3pt;font-weight:700;text-align:center;padding:.6mm .3mm;border-right:1px solid #fff;border-bottom:1px solid #000;vertical-align:middle;-webkit-print-color-adjust:exact;print-color-adjust:exact}
   th:last-child{border-right:0}
-
-  td{
-    height:5.5mm;
-    border-right:1px solid #000;border-bottom:1px solid #000;
-    padding:.65mm 1.1mm;
-    vertical-align:middle;
-    overflow-wrap:anywhere;
-    word-break:break-word;
-  }
+  td{height:4.4mm;border-right:1px solid #000;border-bottom:1px solid #000;padding:.35mm .55mm;vertical-align:middle;overflow-wrap:anywhere;word-break:break-word}
   td:last-child{border-right:0}
-  td.nr{text-align:center}
-  td.particulars{font-size:8.4pt}
-  td.initial{text-align:center;font-size:7.4pt}
-  td.date{text-align:center;font-size:6.7pt}
-  td.action{text-align:center;font-size:7.1pt}
-  td.remarks{font-size:7pt}
-
-  .bottom{
-    display:grid;
-    grid-template-columns:1fr 48mm;
-    min-height:30mm;
-  }
-  .legend{
-    border-right:1px solid #000;
-    padding:1.8mm 3mm 1.2mm;
-    font-size:5.5pt;
-    line-height:1.35;
-  }
-  .legendGrid{display:grid;grid-template-columns:1fr 1fr;gap:0 3mm}
-  .legendTitle{text-align:center;font-weight:700;font-size:6pt;margin-bottom:1mm}
-  .legendFooter{text-align:center;margin-top:1mm;font-size:5pt}
-  .bottomBlank{display:grid;grid-template-rows:repeat(4,1fr)}
-  .bottomBlank div{border-bottom:1px solid #000}
-  .bottomBlank div:last-child{border-bottom:0}
+  td.nr{text-align:center}td.particulars{font-size:5.8pt}td.initial{text-align:center;font-size:5.2pt}td.date{text-align:center;font-size:4.8pt}td.action{text-align:center;font-size:4.9pt}td.remarks{font-size:4.8pt}
+  .bottom{display:grid;grid-template-columns:1fr 38mm;min-height:19.5mm}
+  .legend{border-right:1px solid #000;padding:1mm 1.8mm .7mm;font-size:3.7pt;line-height:1.2}
+  .legendGrid{display:grid;grid-template-columns:1fr 1fr;gap:0 1.5mm}.legendTitle{text-align:center;font-weight:700;font-size:4.1pt;margin-bottom:.6mm}.legendFooter{text-align:center;margin-top:.6mm;font-size:3.4pt}
+  .bottomBlank{display:grid;grid-template-rows:repeat(4,1fr)}.bottomBlank div{border-bottom:1px solid #000}.bottomBlank div:last-child{border-bottom:0}
 
   @media print{
     html,body{background:#fff;width:210mm;min-height:297mm}
     body{padding:0}
     .toolbar{display:none!important}
-    .sheet{width:202mm;margin:0;box-shadow:none;padding:3mm;grid-template-columns:96mm 96mm;gap:4mm}
+    .sheet{width:202mm;margin:0;padding:3mm;grid-template-columns:96mm 96mm;gap:4mm;box-shadow:none}
+    .slip,.title,th{ -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
   }
 </style>
 </head>
