@@ -303,10 +303,11 @@ function buildRoutingSlipHtml(d){
 
   const rowHtml=rows.map(r=>`<tr>
     <td class="nr">${esc(r.nr)}</td>
-    <td class="name">${esc(r.name)}${r.initial?`<br><span style="font-size:7pt;font-weight:600">${esc(r.initial)}</span>`:""}</td>
-    <td class="date">${esc(r.date?formatMemoDate(r.date):"")}</td>
-    <td class="action">${esc(r.action)}</td>
-    <td class="remarks">${esc(r.remarks)}</td>
+    <td class="particulars">${esc(r.name)}</td>
+    <td class="initial">${esc(r.initial||"")}</td>
+    <td class="date">${esc(r.date?formatRoutingDate(r.date):"")}</td>
+    <td class="action">${esc(r.action||"")}</td>
+    <td class="remarks">${esc(r.remarks||"")}</td>
   </tr>`).join("");
 
   return `<!doctype html>
@@ -321,54 +322,97 @@ function buildRoutingSlipHtml(d){
   html,body{margin:0;padding:0;background:#eef1f5;color:#000;font-family:Arial,Helvetica,sans-serif}
   body{min-height:100vh;padding:18px}
   .toolbar{
-    width:min(900px,100%);margin:0 auto 12px;display:flex;justify-content:flex-end;
-    gap:8px
+    width:min(900px,100%);margin:0 auto 12px;display:flex;justify-content:flex-end;gap:8px
   }
   .toolbar button{
     appearance:none;border:1px solid #cbd5e1;border-radius:9px;background:#fff;
     color:#173b67;font:600 14px Arial,sans-serif;padding:9px 16px;cursor:pointer
   }
   .toolbar .printBtn{background:#173b67;color:#fff;border-color:#173b67}
+
+  /* The slip itself follows the size and proportions of the supplied sample. */
   .sheet{
-    width:134.6mm;min-height:190mm;margin:0 auto;background:#fff;
-    padding:0;box-shadow:0 3px 16px rgba(15,23,42,.18)
+    width:134.6mm;margin:0 auto;background:#fff;padding:0;
+    box-shadow:0 3px 16px rgba(15,23,42,.18)
   }
   .slip{
-    width:134.6mm;border:1px solid #173b67;background:#fff;
+    width:134.6mm;border:1px solid #000;background:#fff;
     font-family:Arial,Helvetica,sans-serif;font-size:8.4pt;line-height:1.08
   }
   .title{
     height:6.8mm;background:#073d70;color:#fff;border-bottom:1px solid #000;
     text-align:center;font-size:13pt;font-weight:700;letter-spacing:.2px;padding:1mm
   }
-  .meta{display:grid;grid-template-columns:1fr 1.03fr}
+
+  .meta{
+    display:grid;
+    grid-template-columns:1fr 1.04fr;
+    border-bottom:1px solid #000;
+  }
   .metaLeft{border-right:1px solid #000}
-  .metaCell{min-height:7mm;border-bottom:1px solid #000;padding:.8mm 1.1mm;font-size:8.5pt}
+  .metaCell{
+    min-height:7mm;border-bottom:1px solid #000;
+    padding:.8mm 1.1mm;font-size:8.5pt;
+    display:flex;align-items:flex-start;gap:1.5mm;
+  }
   .metaCell:last-child{border-bottom:0}
-  .metaRight .metaCell{display:flex;align-items:flex-start;gap:1.5mm}
+  .subjectCell{min-height:8.2mm}
+  .controlCell{min-height:8.2mm}
+  .metaRight .metaCell{display:flex;align-items:flex-start}
   .metaLabel{font-weight:400;white-space:nowrap}
-  .metaValue{font-weight:600;flex:1;overflow-wrap:anywhere}
-  .subjectCell{min-height:14mm}
+  .metaValue{font-weight:600;flex:1;overflow-wrap:anywhere;word-break:break-word}
+
   .blankBand{height:5mm;border-bottom:1px solid #000}
-  table{width:100%;border-collapse:collapse;table-layout:fixed}
+
+  table{
+    width:100%;
+    border-collapse:collapse;
+    table-layout:fixed;
+  }
+  col.nrCol{width:8mm}
+  col.particularsCol{width:33mm}
+  col.initialCol{width:13mm}
+  col.dateCol{width:16mm}
+  col.actionCol{width:25mm}
+  col.remarksCol{width:39.6mm}
+
   th{
-    background:#073d70;color:#fff;font-size:9.5pt;font-weight:700;text-align:center;
-    padding:1.5mm 1mm;border-right:1px solid #fff;border-bottom:1px solid #000
+    height:12mm;
+    background:#073d70;color:#fff;
+    font-size:8.7pt;font-weight:700;text-align:center;
+    padding:1.2mm .7mm;
+    border-right:1px solid #fff;border-bottom:1px solid #000;
+    vertical-align:middle;
   }
   th:last-child{border-right:0}
+
   td{
-    height:5.5mm;border-right:1px solid #000;border-bottom:1px solid #000;
-    padding:.7mm 1.2mm;vertical-align:middle;overflow-wrap:anywhere
+    height:5.5mm;
+    border-right:1px solid #000;border-bottom:1px solid #000;
+    padding:.65mm 1.1mm;
+    vertical-align:middle;
+    overflow-wrap:anywhere;
+    word-break:break-word;
   }
   td:last-child{border-right:0}
-  .nr{width:8mm;text-align:center}
-  .name{width:42mm;font-size:8.8pt}
-  .initial{width:15mm;text-align:center;font-size:7.5pt}
-  .date{width:16mm;text-align:center;font-size:6.8pt}
-  .action{width:26mm;text-align:center;font-size:7.2pt}
-  .remarks{width:27.6mm;font-size:7pt}
-  .bottom{display:grid;grid-template-columns:1fr 48mm;min-height:19mm}
-  .legend{border-right:1px solid #000;padding:1.8mm 3mm 1.2mm;font-size:5.5pt;line-height:1.35}
+  td.nr{text-align:center}
+  td.particulars{font-size:8.4pt}
+  td.initial{text-align:center;font-size:7.4pt}
+  td.date{text-align:center;font-size:6.7pt}
+  td.action{text-align:center;font-size:7.1pt}
+  td.remarks{font-size:7pt}
+
+  .bottom{
+    display:grid;
+    grid-template-columns:1fr 48mm;
+    min-height:30mm;
+  }
+  .legend{
+    border-right:1px solid #000;
+    padding:1.8mm 3mm 1.2mm;
+    font-size:5.5pt;
+    line-height:1.35;
+  }
   .legendGrid{display:grid;grid-template-columns:1fr 1fr;gap:0 3mm}
   .legendTitle{text-align:center;font-weight:700;font-size:6pt;margin-bottom:1mm}
   .legendFooter{text-align:center;margin-top:1mm;font-size:5pt}
@@ -378,7 +422,7 @@ function buildRoutingSlipHtml(d){
 
   @media print{
     html,body{background:#fff}
-    body{padding:5mm}
+    body{padding:0}
     .toolbar{display:none!important}
     .sheet{margin:0;box-shadow:none}
   }
@@ -400,7 +444,7 @@ function buildRoutingSlipHtml(d){
             <span class="metaLabel">Subject:</span>
             <span class="metaValue">${esc(d?.subject||"")}</span>
           </div>
-          <div class="metaCell">
+          <div class="metaCell controlCell">
             <span class="metaLabel">Control No.:</span>
             <span class="metaValue">${esc(d?.controlRefId||"")}</span>
           </div>
@@ -426,19 +470,20 @@ function buildRoutingSlipHtml(d){
 
       <table>
         <colgroup>
-          <col style="width:8mm">
-          <col style="width:42mm">
-          <col style="width:15mm">
-          <col style="width:16mm">
-          <col style="width:26mm">
-          <col style="width:27.6mm">
+          <col class="nrCol">
+          <col class="particularsCol">
+          <col class="initialCol">
+          <col class="dateCol">
+          <col class="actionCol">
+          <col class="remarksCol">
         </colgroup>
         <thead>
           <tr>
             <th>NR</th>
+            <th>PARTICULARS</th>
             <th>INITIAL</th>
             <th>DATE</th>
-            <th>ACTION REQUESTED</th>
+            <th>ACTION<br>REQUESTED</th>
             <th>REMARKS / COMMENTS</th>
           </tr>
         </thead>
@@ -479,6 +524,15 @@ function buildRoutingSlipHtml(d){
   </div>
 </body>
 </html>`;
+}
+
+function formatRoutingDate(value){
+  if(value===undefined||value===null||value==="") return "";
+  const d=new Date(value);
+  if(!Number.isNaN(d.getTime())){
+    return d.toLocaleDateString("en-PH",{month:"2-digit",day:"2-digit",year:"numeric"});
+  }
+  return String(value);
 }
 
 async function printRoutingSlip(id){
