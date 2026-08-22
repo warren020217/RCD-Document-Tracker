@@ -1,5 +1,6 @@
+
 const RCD_API =
-  "https://script.google.com/macros/s/AKfycbzHugvrj1wVLXJV_ov9iUoeC9JL9M55fXRpbVLIHauMHkd2lpUNgb6KqPHLE53-Ed93gg/exec";
+  "https://script.google.com/macros/s/AKfycbwHzDaYajm2SuzLMMHsa9_Zk6x6uEs-MiRNLRpZ8s1wRvavHsLdVla9cP8Xh1kWbYVFbw/exec";
 
 module.exports = async function handler(req, res) {
   try {
