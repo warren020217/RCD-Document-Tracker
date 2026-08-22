@@ -221,6 +221,7 @@ function renderLatestMemos(data){
       <div class="memoActions">
         <button class="memoForward" type="button" data-memo-id="${esc(d.controlRefId||"")}" data-memo-action="view">View</button>
         <button class="memoForward" type="button" data-memo-id="${esc(d.controlRefId||"")}" data-memo-action="forward">Forward</button>
+        <button class="memoForward" type="button" data-memo-id="${esc(d.controlRefId||"")}" data-memo-action="print">Print Routing Slip</button>
       </div>
     </div>
   `).join("");
@@ -229,11 +230,184 @@ function renderLatestMemos(data){
     btn.addEventListener("click",()=>{
       const id=btn.dataset.memoId||"";
       const mode=btn.dataset.memoAction||"view";
-      openMemoModal(id,mode);
+      if(mode==="print") printRoutingSlip(id);
+      else openMemoModal(id,mode);
     });
   });
 }
 
+
+
+function getReceivedRecord(d){
+  const history=Array.isArray(d?.history)?d.history:[];
+  const received=history.find(x=>String(x?.action||"").toUpperCase()==="RECEIVE")
+    || history.find(x=>/receiv/i.test(String(x?.action||"")));
+  return received||null;
+}
+
+function printRoutingSlipDate(value){
+  if(value===undefined||value===null||value==="") return "";
+  const d=new Date(value);
+  if(!Number.isNaN(d.getTime())) return d.toLocaleDateString("en-PH",{year:"numeric",month:"long",day:"numeric"});
+  return String(value);
+}
+
+function printRoutingSlipTime(value){
+  if(value===undefined||value===null||value==="") return "";
+  const d=new Date(value);
+  if(!Number.isNaN(d.getTime())) return d.toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"});
+  return String(value);
+}
+
+function routingSlipRows(d){
+  const names=[
+    "Asst. C, RCD/C,ADMIN",
+    "C,Mgmt.",
+    "C, PBAS",
+    "C, BFS",
+    "Chief Clerk",
+    "Action PNCO"
+  ];
+  const history=Array.isArray(d?.history)?d.history:[];
+  const receive=getReceivedRecord(d);
+  const relevant=history.filter(x=>String(x?.action||"").toUpperCase()!=="INITIAL").slice(-6).reverse();
+  const rows=names.map((name,i)=>{
+    const h=relevant[i];
+    return {
+      nr:6-i,
+      name,
+      initial:h?.personnel||h?.toPersonnel||h?.receivedBy||"",
+      date:h?.dateTime||h?.date||"",
+      action:h?.action||"",
+      remarks:h?.remarks||""
+    };
+  });
+  if(receive && !rows.some(r=>r.initial===receive.personnel)){
+    rows[5]={
+      nr:1,
+      name:"Action PNCO",
+      initial:receive.personnel||receive.receivedBy||d?.receivedBy||"",
+      date:receive.dateTime||d?.dateReceived||d?.dateLogged||"",
+      action:"RECEIVE",
+      remarks:receive.remarks||""
+    };
+  }
+  return rows;
+}
+
+function buildRoutingSlipHtml(d){
+  const received=getReceivedRecord(d);
+  const receivedAt=received?.dateTime||d?.dateReceived||d?.dateLogged||"";
+  const preparedBy=received?.personnel||received?.receivedBy||d?.receivedBy||d?.currentPersonnel||"";
+  const rows=routingSlipRows(d);
+  const rowHtml=rows.map(r=>`<tr>
+    <td class="nr">${esc(r.nr)}</td>
+    <td class="name">${esc(r.name)}</td>
+    <td class="initial">${esc(r.initial)}</td>
+    <td class="date">${esc(r.date?formatMemoDate(r.date):"")}</td>
+    <td class="action">${esc(r.action)}</td>
+    <td class="remarks">${esc(r.remarks)}</td>
+  </tr>`).join("");
+
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><title>RCD Routing Slip - ${esc(d?.controlRefId||"")}</title>
+<style>
+  @page{size:A4 portrait;margin:0}
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:#fff;color:#000;font-family:Arial,Helvetica,sans-serif}
+  body{width:210mm;min-height:297mm;padding:5mm}
+  .sheet{width:134.6mm;height:auto}
+  .slip{width:134.6mm;border:1px solid #173b67;font-family:Arial,Helvetica,sans-serif;font-size:8.4pt;line-height:1.08}
+  .title{height:6.8mm;background:#073d70;color:#fff;border-bottom:1px solid #000;text-align:center;font-size:13pt;font-weight:700;letter-spacing:.2px;padding:1.0mm 1mm}
+  .meta{display:grid;grid-template-columns:1fr 1.03fr}
+  .metaLeft,.metaRight{min-height:7mm}
+  .metaLeft{border-right:1px solid #000}
+  .metaCell{min-height:7mm;border-bottom:1px solid #000;padding:.8mm 1.1mm;font-size:8.5pt}
+  .metaCell:last-child{border-bottom:0}
+  .metaRight .metaCell{display:flex;align-items:flex-start;gap:1.5mm}
+  .metaLabel{font-weight:400;white-space:nowrap}
+  .metaValue{font-weight:600;flex:1;overflow-wrap:anywhere}
+  .subjectCell{min-height:14mm}
+  .blankBand{height:5mm;border-bottom:1px solid #000}
+  table{width:100%;border-collapse:collapse;table-layout:fixed}
+  th{background:#073d70;color:#fff;font-size:9.5pt;font-weight:700;text-align:center;padding:1.5mm 1mm;border-right:1px solid #fff;border-bottom:1px solid #000}
+  th:last-child{border-right:0}
+  td{height:5.5mm;border-right:1px solid #000;border-bottom:1px solid #000;padding:.7mm 1.2mm;vertical-align:middle;overflow-wrap:anywhere}
+  td:last-child{border-right:0}
+  .nr{width:8mm;text-align:center}
+  .name{width:42mm;font-size:8.8pt}
+  .initial{width:15mm;text-align:center;font-size:7.5pt}
+  .date{width:16mm;text-align:center;font-size:6.8pt}
+  .action{width:26mm;text-align:center;font-size:7.2pt}
+  .remarks{width:27.6mm;font-size:7pt}
+  .bottom{display:grid;grid-template-columns:1fr 48mm;min-height:19mm}
+  .legend{border-right:1px solid #000;padding:1.8mm 3mm 1.2mm;font-size:5.5pt;line-height:1.35}
+  .legendGrid{display:grid;grid-template-columns:1fr 1fr;gap:0 3mm}
+  .legendTitle{text-align:center;font-weight:700;font-size:6pt;margin-bottom:1mm}
+  .legendFooter{text-align:center;margin-top:1mm;font-size:5pt}
+  .bottomBlank{display:grid;grid-template-rows:repeat(4,1fr)}
+  .bottomBlank div{border-bottom:1px solid #000}
+  .bottomBlank div:last-child{border-bottom:0}
+  .printNote{display:none}
+  @media print{body{padding:5mm}.slip{break-inside:avoid}}
+</style></head><body>
+<div class="sheet"><div class="slip">
+  <div class="title">RCD ROUTING SLIP</div>
+  <div class="meta">
+    <div class="metaLeft">
+      <div class="metaCell subjectCell"><span class="metaLabel">Subject:</span> <span class="metaValue">${esc(d?.subject||"")}</span></div>
+      <div class="metaCell"><span class="metaLabel">Control No.:</span> <span class="metaValue">${esc(d?.controlRefId||"")}</span></div>
+    </div>
+    <div class="metaRight">
+      <div class="metaCell"><span class="metaLabel">Date:</span> <span class="metaValue">${esc(printRoutingSlipDate(receivedAt))}</span></div>
+      <div class="metaCell"><span class="metaLabel">Time In:</span> <span class="metaValue">${esc(printRoutingSlipTime(receivedAt))}</span></div>
+      <div class="metaCell"><span class="metaLabel">Prepared by:</span> <span class="metaValue">${esc(preparedBy)}</span></div>
+    </div>
+  </div>
+  <div class="blankBand"></div>
+  <table><thead><tr>
+    <th class="nr">NR</th><th class="name">INITIAL</th><th class="date">DATE</th><th class="action">ACTION REQUESTED</th><th class="remarks">REMARKS / COMMENTS</th>
+  </tr></thead><tbody>${rowHtml}</tbody></table>
+  <div class="bottom">
+    <div class="legend">
+      <div class="legendTitle">ACTION REQUESTED</div>
+      <div class="legendGrid">
+        <div>A. APPROVAL / SIGNATURE<br>B. APPROPRIATE STAFF ACTION<br>C. COMMENTS AND RECOMMENDATION<br>D. REPLY DIRECT TO WRITER<br>E. REPLY FOR SIG OF RD<br>F. ATTN TO HWI/HWN INSIDE<br>G. REWRITE/RETYPE</div>
+        <div>H. STUDY REVIEW/INVESTIGATE<br>I. NOTABLE INFORMATION<br>J. REFERENCE FILE<br>K. DISPATCH<br>L. WIDEST DISSEMINATION<br>M. SEE REMARKS / INSTRUCTIONS<br>N. SEE ME</div>
+      </div>
+      <div class="legendFooter">(Indicate Letter Only)</div>
+    </div>
+    <div class="bottomBlank"><div></div><div></div><div></div><div></div></div>
+  </div>
+</div></div>
+<script>
+  window.addEventListener('load',()=>setTimeout(()=>window.print(),250));
+  window.addEventListener('afterprint',()=>window.close());
+</script>
+</body></html>`;
+}
+
+async function printRoutingSlip(id){
+  id=(id||"").trim();
+  if(!id)return toast("Control Ref ID is missing.");
+  const win=window.open("","_blank","width=900,height=900,noopener,noreferrer");
+  if(!win){
+    toast("Please allow pop-ups to print the routing slip.");
+    return;
+  }
+  win.document.write('<!doctype html><html><body style="font-family:Arial;padding:20px">Loading routing slip...</body></html>');
+  win.document.close();
+  try{
+    const data=await api({action:"getDocument",id});
+    if(!data||data.result==="error")throw new Error(data?.message||data?.error||"Document not found.");
+    const d=data.document||data;
+    win.document.open();
+    win.document.write(buildRoutingSlipHtml(d));
+    win.document.close();
+  }catch(e){
+    win.document.body.innerHTML=`<div style="font-family:Arial;color:#b91c1c;padding:20px">Unable to print routing slip: ${esc(e.message)}</div>`;
+  }
+}
 
 function ensureMemoModal(){
   let modal=$("memoModal");
