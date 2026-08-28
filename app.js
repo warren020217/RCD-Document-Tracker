@@ -201,13 +201,19 @@ function renderLatestMemos(data){
   }
 
   let rows=Array.isArray(data.documents)?data.documents:[];
-  const total=Number(data.total ?? rows.length) || 0;
   const offset=Number(data.offset ?? (memoPage*MEMOS_PER_PAGE)) || 0;
-  const limit=Number(data.limit ?? MEMOS_PER_PAGE) || MEMOS_PER_PAGE;
-  const pageNumber=Math.floor(offset/limit)+1;
-  const totalPages=Math.max(1,Math.ceil(total/limit));
-  const hasPrevious=Boolean(data.hasPrevious ?? offset>0);
-  const hasNext=Boolean(data.hasNext ?? (offset+limit<total));
+  const limit=MEMOS_PER_PAGE;
+
+  // Some Apps Script responses report the number of rows returned as `total`
+  // instead of the database total. Never disable Next just because that value
+  // happens to be 20. The page itself is the reliable signal when it is full.
+  const reportedTotal=Number(data.total);
+  const fullPage=rows.length>=MEMOS_PER_PAGE;
+  const hasPrevious=offset>0;
+  const hasNext=fullPage || (Number.isFinite(reportedTotal) && reportedTotal>offset+rows.length);
+  const pageNumber=Math.floor(offset/MEMOS_PER_PAGE)+1;
+  const totalKnown=Number.isFinite(reportedTotal) && reportedTotal>offset+rows.length;
+  const totalPages=totalKnown ? Math.max(pageNumber,Math.ceil(reportedTotal/MEMOS_PER_PAGE)) : null;
 
   rows=rows.map((d,index)=>({...d,__index:index}));
 
@@ -252,9 +258,13 @@ function renderLatestMemos(data){
     </div>`;
   }).join("") : '<p class="muted">No memos found.</p>';
 
+  const showingStart=rows.length ? offset+1 : 0;
+  const showingEnd=rows.length ? offset+rows.length : 0;
+  const pageLabel=totalPages ? `Page ${pageNumber} of ${totalPages}` : `Page ${pageNumber}`;
+  const totalLabel=totalKnown ? ` of ${reportedTotal}` : ` of more`;
   const pagination=`<div class="memoPagination">
     <button type="button" class="memoPageBtn" id="memoPrev" ${hasPrevious?'':'disabled'}>Back</button>
-    <span class="memoPageInfo">Page ${pageNumber} of ${totalPages} · Showing ${total ? offset+1 : 0}-${Math.min(offset+rows.length,total)} of ${total}</span>
+    <span class="memoPageInfo">${pageLabel} · Showing ${showingStart}-${showingEnd}${totalLabel}</span>
     <button type="button" class="memoPageBtn" id="memoNext" ${hasNext?'':'disabled'}>Next</button>
   </div>`;
 
@@ -906,12 +916,15 @@ async function loadMemoPage(pageIndex, options={}){
   totalTarget.innerHTML='<div class="box loading">Loading memos...</div>';
   try{
     const d=await apiAction("getDocuments",{
-      limit:MEMOS_PER_PAGE,
+      limit:MEMOS_PER_PAGE+1,
       offset:page*MEMOS_PER_PAGE,
       sync:sync ? "true" : "false"
     });
     memoPage=Number(d.offset||0)/MEMOS_PER_PAGE;
-    renderLatestMemos(d);
+    const docs=Array.isArray(d.documents)?d.documents:[];
+    const hasProbeNext=docs.length>MEMOS_PER_PAGE;
+    const pageDocs=docs.slice(0,MEMOS_PER_PAGE);
+    renderLatestMemos({...d,documents:pageDocs,hasNext:hasProbeNext || Boolean(d.hasNext)});
   }catch(e){
     totalTarget.innerHTML=`<div class="error">Unable to load memos: ${esc(e.message)}</div>`;
   }
