@@ -2,8 +2,6 @@ let API_URL=(window.RCD_CONFIG||{}).API_URL||localStorage.getItem("RCD_API_URL")
 let current=null,scanner=null,jsonpCounter=0;
 let memoPage=0;
 const MEMOS_PER_PAGE=20;
-const MEMOS_FETCH_SIZE=100;
-const memoPageCache=new Map();
 const selectedMemoIds=new Set();
 const memoDataById=new Map();
 
@@ -903,45 +901,60 @@ async function openMemoModal(id,mode="view"){
 async function loadMemoPage(pageIndex, options={}){
   const totalTarget=$("latestMemos");
   if(!totalTarget)return;
-  const page=Math.max(0,Number(pageIndex)||0);
-  const block=Math.floor((page*MEMOS_PER_PAGE)/MEMOS_FETCH_SIZE)*MEMOS_FETCH_SIZE;
-  const indexInBlock=(page*MEMOS_PER_PAGE)-block;
-  totalTarget.innerHTML='<div class="box loading">Loading memos...</div>';
-  try{
-    let blockData=memoPageCache.get(block);
-    if(!blockData){
-      blockData=await apiAction("getDocuments",{
-        limit:MEMOS_FETCH_SIZE,
-        offset:block,
-        sync:"false"
-      });
-      memoPageCache.set(block,blockData);
-    }
 
-    const docs=Array.isArray(blockData.documents)?blockData.documents:[];
-    const pageDocs=docs.slice(indexInBlock,indexInBlock+MEMOS_PER_PAGE);
-    const total=Number(blockData.total)||0;
-    const actualOffset=page*MEMOS_PER_PAGE;
-    const hasPrevious=page>0;
-    const hasNext=actualOffset+pageDocs.length<total;
+  const page=Math.max(0,Number(pageIndex)||0);
+  const offset=page*MEMOS_PER_PAGE;
+  totalTarget.innerHTML='<div class="box loading">Loading memos...</div>';
+
+  try{
+    // Request one extra record so pagination works even when the API
+    // does not provide a total count. The extra record is used only
+    // to determine whether a Next page exists.
+    const d=await apiAction("getDocuments",{
+      limit:MEMOS_PER_PAGE+1,
+      offset:offset,
+      sync:"false"
+    });
+
+    const allRows=Array.isArray(d.documents)?d.documents:[];
+    const hasNext=allRows.length>MEMOS_PER_PAGE;
+    const pageDocs=allRows.slice(0,MEMOS_PER_PAGE);
+
+    // Prefer an API total when it is real. Otherwise derive pagination
+    // from the extra-record test above.
+    const apiTotal=Number(d.total);
+    const hasRealTotal=Number.isFinite(apiTotal)&&apiTotal>0;
+    const total=hasRealTotal?apiTotal:(hasNext?offset+MEMOS_PER_PAGE+1:offset+pageDocs.length);
+    const totalPages=hasRealTotal?Math.max(1,Math.ceil(total/MEMOS_PER_PAGE)):(hasNext?page+2:page+1);
 
     memoPage=page;
     renderLatestMemos({
-      ...blockData,
+      ...d,
       documents:pageDocs,
-      total,
-      offset:actualOffset,
+      total:total,
+      offset:offset,
       limit:MEMOS_PER_PAGE,
-      hasPrevious,
-      hasNext
+      hasPrevious:page>0,
+      hasNext:hasNext
     });
+
+    // If the API does not expose a total, replace the misleading
+    // inferred "of N" with a stable page indicator while keeping
+    // Back/Next fully functional.
+    if(!hasRealTotal){
+      const info=$("latestMemos")?.querySelector(".memoPageInfo");
+      if(info){
+        const first=pageDocs.length?offset+1:0;
+        const last=offset+pageDocs.length;
+        info.textContent=`Page ${page+1} · Showing ${first}-${last}${hasNext?" · More available":""}`;
+      }
+    }
   }catch(e){
     totalTarget.innerHTML=`<div class="error">Unable to load memos: ${esc(e.message)}</div>`;
   }
 }
 
 async function latestMemos(){
-  memoPageCache.clear();
   memoPage=0;
   // Do not run the full source-to-target sync on every page load.
   // Automatic Apps Script triggers handle synchronization.
