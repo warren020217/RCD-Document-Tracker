@@ -1,7 +1,5 @@
 let API_URL=(window.RCD_CONFIG||{}).API_URL||localStorage.getItem("RCD_API_URL")||"/api/rcd";
 let current=null,scanner=null,jsonpCounter=0;
-let memoPage=0;
-const MEMOS_PER_PAGE=5000;
 const selectedMemoIds=new Set();
 const memoDataById=new Map();
 
@@ -201,8 +199,7 @@ function renderLatestMemos(data){
   }
 
   let rows=Array.isArray(data.documents)?data.documents:[];
-  const total=rows.length;
-
+  const total=Number(data.total ?? rows.length) || rows.length;
   rows=rows.map((d,index)=>({...d,__index:index}));
 
   rows.forEach(d=>{
@@ -249,10 +246,9 @@ function renderLatestMemos(data){
   target.innerHTML=`${batchBar}
     <div class="memoSelectAllRow">
       <label><input type="checkbox" id="latestSelectAll" ${allChecked?'checked':''}> Select all visible</label>
-      <span>${rows.length.toLocaleString()} memos</span>
-      ${count?`<span>${count} selected</span>`:""}
+      <span>${total.toLocaleString()} memo${total===1?'':'s'}</span>
     </div>
-    <div class="memoListScroll">${listHtml}</div>`;
+    <div class="memoScrollList">${listHtml}</div>`;
 
   target.querySelectorAll(".memoSelect").forEach(box=>{
     box.addEventListener("change",()=>{
@@ -303,11 +299,21 @@ function injectLatestMemoStyles(){
     .memoBatchClear{color:#64748b}
     .memoSelectAllRow{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0 9px;color:#64748b;font-size:12px}
     .memoSelectAllRow label{display:flex;align-items:center;gap:7px;cursor:pointer}
+    .memoScrollList{max-height:560px;overflow-y:auto;overflow-x:hidden;border-top:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;padding-right:4px;scrollbar-gutter:stable}
+    .memoScrollList::-webkit-scrollbar{width:10px}
+    .memoScrollList::-webkit-scrollbar-track{background:#f1f5f9;border-radius:8px}
+    .memoScrollList::-webkit-scrollbar-thumb{background:#94a3b8;border-radius:8px;border:2px solid #f1f5f9}
+    .memoScrollList{scrollbar-width:auto}
     .memoSelectAllRow input,.memoSelect{width:17px;height:17px;accent-color:#173b67;cursor:pointer}
     .memoItem{display:flex;align-items:center;gap:10px}
     .memoCheckWrap{flex:0 0 24px;display:flex;align-items:center;justify-content:center}
     .memoItemSelected{background:#f4f8fc}
     .memoItemSelected .memoSubject{color:#173b67}
+    .memoPagination{display:flex;align-items:center;justify-content:center;gap:14px;padding:16px 0 2px;border-top:1px solid #e2e8f0;margin-top:4px}
+    .memoPageBtn{appearance:none;border:1px solid #cbd5e1;border-radius:9px;background:#fff;color:#173b67;font:600 13px Arial,sans-serif;padding:9px 20px;cursor:pointer;min-width:86px}
+    .memoPageBtn:hover:not(:disabled){background:#f4f8fc}
+    .memoPageBtn:disabled{color:#94a3b8;background:#f8fafc;cursor:not-allowed;opacity:.8}
+    .memoPageInfo{font-size:12px;color:#64748b;text-align:center}
     @media(max-width:650px){
       .memoItem{align-items:flex-start;flex-wrap:wrap}
       .memoCheckWrap{padding-top:3px}
@@ -878,29 +884,24 @@ async function openMemoModal(id,mode="view"){
   }
 }
 
-async function loadMemoPage(pageIndex, options={}){
-  const totalTarget=$("latestMemos");
-  if(!totalTarget)return;
-  const sync=options.sync===true;
-  totalTarget.innerHTML='<div class="box loading">Loading all memos...</div>';
+async function loadAllMemos(options={}){
+  const target=$("latestMemos");
+  if(!target)return;
+  target.innerHTML='<div class="box loading">Loading all memos...</div>';
   try{
     const d=await apiAction("getDocuments",{
-      limit:MEMOS_PER_PAGE,
+      limit:5000,
       offset:0,
-      sync:sync ? "true" : "false"
+      sync:options.sync===true ? "true" : "false"
     });
-    memoPage=0;
     renderLatestMemos(d);
   }catch(e){
-    totalTarget.innerHTML=`<div class="error">Unable to load memos: ${esc(e.message)}</div>`;
+    target.innerHTML=`<div class="error">Unable to load memos: ${esc(e.message)}</div>`;
   }
 }
 
 async function latestMemos(){
-  memoPage=0;
-  // Do not run the full source-to-target sync on every page load.
-  // Automatic Apps Script triggers handle synchronization.
-  return loadMemoPage(0,{sync:false});
+  return loadAllMemos({sync:false});
 }
 
 async function dashboard(){
