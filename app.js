@@ -886,7 +886,7 @@ async function latestMemos(){
   if(!target)return;
   target.innerHTML='<div class="box loading">Loading latest memos...</div>';
   try{
-    const d=await apiAction("getDocuments",{limit:20});
+    const d=await apiAction("getDocuments",{limit:20,sync:"true"});
     renderLatestMemos(d);
   }catch(e){
     target.innerHTML=`<div class="error">Unable to load latest memos: ${esc(e.message)}</div>`;
