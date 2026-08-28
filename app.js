@@ -919,7 +919,9 @@ async function loadMemoPage(pageIndex, options={}){
 
 async function latestMemos(){
   memoPage=0;
-  return loadMemoPage(0,{sync:true});
+  // Do not run the full source-to-target sync on every page load.
+  // Automatic Apps Script triggers handle synchronization.
+  return loadMemoPage(0,{sync:false});
 }
 
 async function dashboard(){
