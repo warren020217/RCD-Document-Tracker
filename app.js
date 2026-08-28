@@ -1,7 +1,7 @@
 let API_URL=(window.RCD_CONFIG||{}).API_URL||localStorage.getItem("RCD_API_URL")||"/api/rcd";
 let current=null,scanner=null,jsonpCounter=0;
 let memoPage=0;
-const MEMOS_PER_PAGE=2000;
+const MEMOS_PER_PAGE=1000;
 const selectedMemoIds=new Set();
 const memoDataById=new Map();
 
