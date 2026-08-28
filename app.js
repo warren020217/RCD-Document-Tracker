@@ -2,6 +2,9 @@ let API_URL=(window.RCD_CONFIG||{}).API_URL||localStorage.getItem("RCD_API_URL")
 let current=null,scanner=null,jsonpCounter=0;
 const selectedMemoIds=new Set();
 const memoDataById=new Map();
+let latestMemoPage=0;
+const latestMemoPageSize=20;
+let latestMemoTotal=0;
 
 const $=id=>document.getElementById(id);
 const esc=v=>String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
@@ -258,13 +261,18 @@ function renderLatestMemos(data){
           <button class="memoForward" type="button" data-memo-id="${esc(id)}" data-memo-action="print">Print Routing Slip</button>
         </div>
       </div>`;
-    }).join("")}`;
+    }).join("")}
+    <div class="memoPagination" aria-label="Memo pagination">
+      <button type="button" class="memoPageBtn" id="memoPrevBtn" ${latestMemoPage<=0?'disabled':''}>Back</button>
+      <span class="memoPageInfo">Page ${latestMemoPage+1} of ${Math.max(1,Math.ceil(latestMemoTotal/latestMemoPageSize))} · Showing ${latestMemoPage*latestMemoPageSize+1}-${Math.min((latestMemoPage+1)*latestMemoPageSize,latestMemoTotal)} of ${latestMemoTotal}</span>
+      <button type="button" class="memoPageBtn" id="memoNextBtn" ${(latestMemoPage+1)*latestMemoPageSize>=latestMemoTotal?'disabled':''}>Next</button>
+    </div>`;
 
   target.querySelectorAll(".memoSelect").forEach(box=>{
     box.addEventListener("change",()=>{
       const id=box.dataset.memoId||"";
       if(box.checked)selectedMemoIds.add(id);else selectedMemoIds.delete(id);
-      renderLatestMemos({result:"success",documents:rows});
+      renderLatestMemos({result:"success",documents:rows,total:latestMemoTotal});
     });
   });
 
@@ -275,12 +283,19 @@ function renderLatestMemos(data){
       if(!id)return;
       if(checked)selectedMemoIds.add(id);else selectedMemoIds.delete(id);
     });
-    renderLatestMemos({result:"success",documents:rows});
+    renderLatestMemos({result:"success",documents:rows,total:latestMemoTotal});
+  });
+
+  $("memoPrevBtn")?.addEventListener("click",()=>{
+    if(latestMemoPage>0)latestMemos(latestMemoPage-1);
+  });
+  $("memoNextBtn")?.addEventListener("click",()=>{
+    if((latestMemoPage+1)*latestMemoPageSize<latestMemoTotal)latestMemos(latestMemoPage+1);
   });
 
   $("batchClearBtn")?.addEventListener("click",()=>{
     selectedMemoIds.clear();
-    renderLatestMemos({result:"success",documents:rows});
+    renderLatestMemos({result:"success",documents:rows,total:latestMemoTotal});
   });
 
   $("batchForwardBtn")?.addEventListener("click",()=>openBatchForwardModal([...selectedMemoIds]));
@@ -893,15 +908,20 @@ async function openMemoModal(id,mode="view"){
   }
 }
 
-async function latestMemos(){
+async function latestMemos(page=latestMemoPage){
   const target=$("latestMemos");
   if(!target)return;
-  target.innerHTML='<div class="box loading">Loading latest memos...</div>';
+
+  latestMemoPage=Math.max(0,Number(page)||0);
+  const offset=latestMemoPage*latestMemoPageSize;
+  target.innerHTML='<div class="box loading">Loading memos...</div>';
+
   try{
-    const d=await apiAction("getDocuments",{limit:20});
+    const d=await apiAction("getDocuments",{limit:latestMemoPageSize,offset});
+    latestMemoTotal=Number(d?.total||0);
     renderLatestMemos(d);
   }catch(e){
-    target.innerHTML=`<div class="error">Unable to load latest memos: ${esc(e.message)}</div>`;
+    target.innerHTML=`<div class="error">Unable to load memos: ${esc(e.message)}</div>`;
   }
 }
 

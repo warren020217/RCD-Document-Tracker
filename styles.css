@@ -73,3 +73,9 @@ button{font-size:14px}.mainBtn,.actionBtn{width:100%;border:0;border-radius:7px;
   .memoActions{margin-top:2px}
   .memoForward{padding:9px 12px}
 }
+
+.memoPagination{display:flex;align-items:center;justify-content:center;gap:12px;border-top:1px solid #e2e8f0;margin-top:4px;padding:14px 0 2px;flex-wrap:wrap}
+.memoPageBtn{min-width:86px;border:1px solid #cbd5e1;background:#f8fafc;color:#17365d;border-radius:10px;padding:9px 14px;font-weight:700;cursor:pointer}
+.memoPageBtn:hover:not(:disabled){background:#eef2f7}
+.memoPageBtn:disabled{opacity:.45;cursor:not-allowed}
+.memoPageInfo{font-size:12px;color:#64748b;text-align:center}
