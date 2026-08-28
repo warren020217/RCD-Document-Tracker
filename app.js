@@ -1,7 +1,7 @@
 let API_URL=(window.RCD_CONFIG||{}).API_URL||localStorage.getItem("RCD_API_URL")||"/api/rcd";
 let current=null,scanner=null,jsonpCounter=0;
 let memoPage=0;
-const MEMOS_PER_PAGE=20;
+const MEMOS_PER_PAGE=2000;
 const selectedMemoIds=new Set();
 const memoDataById=new Map();
 
@@ -201,13 +201,8 @@ function renderLatestMemos(data){
   }
 
   let rows=Array.isArray(data.documents)?data.documents:[];
-  const total=Number(data.total ?? rows.length) || 0;
-  const offset=Number(data.offset ?? (memoPage*MEMOS_PER_PAGE)) || 0;
-  const limit=Number(data.limit ?? MEMOS_PER_PAGE) || MEMOS_PER_PAGE;
-  const pageNumber=Math.floor(offset/limit)+1;
-  const totalPages=Math.max(1,Math.ceil(total/limit));
-  const hasPrevious=Boolean(data.hasPrevious ?? offset>0);
-  const hasNext=Boolean(data.hasNext ?? (offset+limit<total));
+  const total=rows.length;
+  const offset=0;
 
   rows=rows.map((d,index)=>({...d,__index:index}));
 
@@ -252,19 +247,13 @@ function renderLatestMemos(data){
     </div>`;
   }).join("") : '<p class="muted">No memos found.</p>';
 
-  const pagination=`<div class="memoPagination">
-    <button type="button" class="memoPageBtn" id="memoPrev" ${hasPrevious?'':'disabled'}>Back</button>
-    <span class="memoPageInfo">Page ${pageNumber} of ${totalPages} · Showing ${total ? offset+1 : 0}-${Math.min(offset+rows.length,total)} of ${total}</span>
-    <button type="button" class="memoPageBtn" id="memoNext" ${hasNext?'':'disabled'}>Next</button>
-  </div>`;
-
   target.innerHTML=`${batchBar}
     <div class="memoSelectAllRow">
       <label><input type="checkbox" id="latestSelectAll" ${allChecked?'checked':''}> Select all visible</label>
+      <span>${rows.length.toLocaleString()} memo${rows.length===1?'':'s'}</span>
       ${count?`<span>${count} selected</span>`:""}
     </div>
-    ${listHtml}
-    ${pagination}`;
+    <div class="memoListScroll">${listHtml}</div>`;
 
   target.querySelectorAll(".memoSelect").forEach(box=>{
     box.addEventListener("change",()=>{
@@ -291,9 +280,6 @@ function renderLatestMemos(data){
 
   $("batchForwardBtn")?.addEventListener("click",()=>openBatchForwardModal([...selectedMemoIds]));
   $("batchPrintBtn")?.addEventListener("click",()=>printSelectedRoutingSlips([...selectedMemoIds]));
-
-  $("memoPrev")?.addEventListener("click",()=>loadMemoPage(memoPage-1));
-  $("memoNext")?.addEventListener("click",()=>loadMemoPage(memoPage+1));
 
   target.querySelectorAll(".memoForward").forEach(btn=>{
     btn.addEventListener("click",()=>{
@@ -328,6 +314,9 @@ function injectLatestMemoStyles(){
     .memoPageBtn:hover:not(:disabled){background:#f4f8fc}
     .memoPageBtn:disabled{color:#94a3b8;background:#f8fafc;cursor:not-allowed;opacity:.8}
     .memoPageInfo{font-size:12px;color:#64748b;text-align:center}
+    .memoListScroll{max-height:620px;overflow-y:auto;overflow-x:hidden;border-top:1px solid #e2e8f0}
+    .memoListScroll .memoItem{padding:14px 0;border-bottom:1px solid #e2e8f0}
+    .memoListScroll .memoItem:last-child{border-bottom:0}
     @media(max-width:650px){
       .memoItem{align-items:flex-start;flex-wrap:wrap}
       .memoCheckWrap{padding-top:3px}
@@ -901,54 +890,16 @@ async function openMemoModal(id,mode="view"){
 async function loadMemoPage(pageIndex, options={}){
   const totalTarget=$("latestMemos");
   if(!totalTarget)return;
-
-  const page=Math.max(0,Number(pageIndex)||0);
-  const offset=page*MEMOS_PER_PAGE;
-  totalTarget.innerHTML='<div class="box loading">Loading memos...</div>';
-
+  const sync=options.sync===true;
+  totalTarget.innerHTML='<div class="box loading">Loading all memos...</div>';
   try{
-    // Request one extra record so pagination works even when the API
-    // does not provide a total count. The extra record is used only
-    // to determine whether a Next page exists.
     const d=await apiAction("getDocuments",{
-      limit:MEMOS_PER_PAGE+1,
-      offset:offset,
-      sync:"false"
-    });
-
-    const allRows=Array.isArray(d.documents)?d.documents:[];
-    const hasNext=allRows.length>MEMOS_PER_PAGE;
-    const pageDocs=allRows.slice(0,MEMOS_PER_PAGE);
-
-    // Prefer an API total when it is real. Otherwise derive pagination
-    // from the extra-record test above.
-    const apiTotal=Number(d.total);
-    const hasRealTotal=Number.isFinite(apiTotal)&&apiTotal>0;
-    const total=hasRealTotal?apiTotal:(hasNext?offset+MEMOS_PER_PAGE+1:offset+pageDocs.length);
-    const totalPages=hasRealTotal?Math.max(1,Math.ceil(total/MEMOS_PER_PAGE)):(hasNext?page+2:page+1);
-
-    memoPage=page;
-    renderLatestMemos({
-      ...d,
-      documents:pageDocs,
-      total:total,
-      offset:offset,
       limit:MEMOS_PER_PAGE,
-      hasPrevious:page>0,
-      hasNext:hasNext
+      offset:0,
+      sync:sync ? "true" : "false"
     });
-
-    // If the API does not expose a total, replace the misleading
-    // inferred "of N" with a stable page indicator while keeping
-    // Back/Next fully functional.
-    if(!hasRealTotal){
-      const info=$("latestMemos")?.querySelector(".memoPageInfo");
-      if(info){
-        const first=pageDocs.length?offset+1:0;
-        const last=offset+pageDocs.length;
-        info.textContent=`Page ${page+1} · Showing ${first}-${last}${hasNext?" · More available":""}`;
-      }
-    }
+    memoPage=0;
+    renderLatestMemos(d);
   }catch(e){
     totalTarget.innerHTML=`<div class="error">Unable to load memos: ${esc(e.message)}</div>`;
   }
@@ -956,8 +907,6 @@ async function loadMemoPage(pageIndex, options={}){
 
 async function latestMemos(){
   memoPage=0;
-  // Do not run the full source-to-target sync on every page load.
-  // Automatic Apps Script triggers handle synchronization.
   return loadMemoPage(0,{sync:false});
 }
 
