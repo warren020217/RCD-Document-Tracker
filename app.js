@@ -1,10 +1,9 @@
 let API_URL=(window.RCD_CONFIG||{}).API_URL||localStorage.getItem("RCD_API_URL")||"/api/rcd";
 let current=null,scanner=null,jsonpCounter=0;
+let memoPage=0;
+const MEMOS_PER_PAGE=20;
 const selectedMemoIds=new Set();
 const memoDataById=new Map();
-let latestMemoPage=0;
-const latestMemoPageSize=20;
-let latestMemoTotal=0;
 
 const $=id=>document.getElementById(id);
 const esc=v=>String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
@@ -202,24 +201,21 @@ function renderLatestMemos(data){
   }
 
   let rows=Array.isArray(data.documents)?data.documents:[];
-  if(!rows.length){
-    target.innerHTML='<p class="muted">No memos found.</p>';
-    return;
-  }
+  const total=Number(data.total ?? rows.length) || 0;
+  const offset=Number(data.offset ?? (memoPage*MEMOS_PER_PAGE)) || 0;
+  const limit=Number(data.limit ?? MEMOS_PER_PAGE) || MEMOS_PER_PAGE;
+  const pageNumber=Math.floor(offset/limit)+1;
+  const totalPages=Math.max(1,Math.ceil(total/limit));
+  const hasPrevious=Boolean(data.hasPrevious ?? offset>0);
+  const hasNext=Boolean(data.hasNext ?? (offset+limit<total));
 
-  rows=rows.map((d,index)=>({...d,__index:index})).sort((a,b)=>{
-    const ad=new Date(a.dateLogged||a.dateReceived||a.createdAt||0).getTime();
-    const bd=new Date(b.dateLogged||b.dateReceived||b.createdAt||0).getTime();
-    if(Number.isFinite(ad)&&Number.isFinite(bd)&&ad!==bd)return bd-ad;
-    return a.__index-b.__index;
-  }).slice(0,20);
+  rows=rows.map((d,index)=>({...d,__index:index}));
 
   rows.forEach(d=>{
     const id=String(d.controlRefId||"").trim();
     if(id)memoDataById.set(id,d);
   });
 
-  // Keep selections only for memos still present in the current list.
   const visibleIds=new Set(rows.map(d=>String(d.controlRefId||"").trim()).filter(Boolean));
   [...selectedMemoIds].forEach(id=>{if(!visibleIds.has(id))selectedMemoIds.delete(id)});
 
@@ -236,43 +232,45 @@ function renderLatestMemos(data){
 
   const allChecked=rows.length>0&&rows.every(d=>selectedMemoIds.has(String(d.controlRefId||"").trim()));
 
+  const listHtml=rows.length ? rows.map(d=>{
+    const id=String(d.controlRefId||"").trim();
+    const selected=selectedMemoIds.has(id);
+    return `<div class="memoItem ${selected?'memoItemSelected':''}">
+      <div class="memoCheckWrap">
+        <input type="checkbox" class="memoSelect" data-memo-id="${esc(id)}" ${selected?'checked':''} aria-label="Select ${esc(id)}">
+      </div>
+      <div class="memoMain">
+        <div class="memoRef">${esc(id)}</div>
+        <div class="memoSubject">${esc(d.subject||"Untitled Memo")}</div>
+        <div class="memoMeta">${esc(d.originatingOffice||"")} ${d.dateLogged?`· ${esc(formatMemoDate(d.dateLogged))}`:""}</div>
+      </div>
+      <div class="memoActions">
+        ${selected?"":`<button class="memoForward" type="button" data-memo-id="${esc(id)}" data-memo-action="view">View</button>`}
+        <button class="memoForward" type="button" data-memo-id="${esc(id)}" data-memo-action="forward">Forward</button>
+        <button class="memoForward" type="button" data-memo-id="${esc(id)}" data-memo-action="print">Print Routing Slip</button>
+      </div>
+    </div>`;
+  }).join("") : '<p class="muted">No memos found.</p>';
+
+  const pagination=`<div class="memoPagination">
+    <button type="button" class="memoPageBtn" id="memoPrev" ${hasPrevious?'':'disabled'}>Back</button>
+    <span class="memoPageInfo">Page ${pageNumber} of ${totalPages} · Showing ${total ? offset+1 : 0}-${Math.min(offset+rows.length,total)} of ${total}</span>
+    <button type="button" class="memoPageBtn" id="memoNext" ${hasNext?'':'disabled'}>Next</button>
+  </div>`;
+
   target.innerHTML=`${batchBar}
     <div class="memoSelectAllRow">
       <label><input type="checkbox" id="latestSelectAll" ${allChecked?'checked':''}> Select all visible</label>
       ${count?`<span>${count} selected</span>`:""}
     </div>
-    ${rows.map(d=>{
-      const id=String(d.controlRefId||"").trim();
-      const selected=selectedMemoIds.has(id);
-      return `<div class="memoItem ${selected?'memoItemSelected':''}">
-        <div class="memoCheckWrap">
-          <input type="checkbox" class="memoSelect" data-memo-id="${esc(id)}" ${selected?'checked':''} aria-label="Select ${esc(id)}">
-        </div>
-        <div class="memoMain">
-          <div class="memoRef">${esc(id)}</div>
-          <div class="memoSubject">${esc(d.subject||"Untitled Memo")}</div>
-          <div class="memoMeta">
-            ${esc(d.originatingOffice||"")} ${d.dateLogged?`· ${esc(formatMemoDate(d.dateLogged))}`:""}
-          </div>
-        </div>
-        <div class="memoActions">
-          ${selected?"":`<button class="memoForward" type="button" data-memo-id="${esc(id)}" data-memo-action="view">View</button>`}
-          <button class="memoForward" type="button" data-memo-id="${esc(id)}" data-memo-action="forward">Forward</button>
-          <button class="memoForward" type="button" data-memo-id="${esc(id)}" data-memo-action="print">Print Routing Slip</button>
-        </div>
-      </div>`;
-    }).join("")}
-    <div class="memoPagination" aria-label="Memo pagination">
-      <button type="button" class="memoPageBtn" id="memoPrevBtn" ${latestMemoPage<=0?'disabled':''}>Back</button>
-      <span class="memoPageInfo">Page ${latestMemoPage+1} of ${Math.max(1,Math.ceil(latestMemoTotal/latestMemoPageSize))} · Showing ${latestMemoPage*latestMemoPageSize+1}-${Math.min((latestMemoPage+1)*latestMemoPageSize,latestMemoTotal)} of ${latestMemoTotal}</span>
-      <button type="button" class="memoPageBtn" id="memoNextBtn" ${(latestMemoPage+1)*latestMemoPageSize>=latestMemoTotal?'disabled':''}>Next</button>
-    </div>`;
+    ${listHtml}
+    ${pagination}`;
 
   target.querySelectorAll(".memoSelect").forEach(box=>{
     box.addEventListener("change",()=>{
       const id=box.dataset.memoId||"";
       if(box.checked)selectedMemoIds.add(id);else selectedMemoIds.delete(id);
-      renderLatestMemos({result:"success",documents:rows,total:latestMemoTotal});
+      renderLatestMemos({...data,documents:rows});
     });
   });
 
@@ -283,23 +281,19 @@ function renderLatestMemos(data){
       if(!id)return;
       if(checked)selectedMemoIds.add(id);else selectedMemoIds.delete(id);
     });
-    renderLatestMemos({result:"success",documents:rows,total:latestMemoTotal});
-  });
-
-  $("memoPrevBtn")?.addEventListener("click",()=>{
-    if(latestMemoPage>0)latestMemos(latestMemoPage-1);
-  });
-  $("memoNextBtn")?.addEventListener("click",()=>{
-    if((latestMemoPage+1)*latestMemoPageSize<latestMemoTotal)latestMemos(latestMemoPage+1);
+    renderLatestMemos({...data,documents:rows});
   });
 
   $("batchClearBtn")?.addEventListener("click",()=>{
     selectedMemoIds.clear();
-    renderLatestMemos({result:"success",documents:rows,total:latestMemoTotal});
+    renderLatestMemos({...data,documents:rows});
   });
 
   $("batchForwardBtn")?.addEventListener("click",()=>openBatchForwardModal([...selectedMemoIds]));
   $("batchPrintBtn")?.addEventListener("click",()=>printSelectedRoutingSlips([...selectedMemoIds]));
+
+  $("memoPrev")?.addEventListener("click",()=>loadMemoPage(memoPage-1));
+  $("memoNext")?.addEventListener("click",()=>loadMemoPage(memoPage+1));
 
   target.querySelectorAll(".memoForward").forEach(btn=>{
     btn.addEventListener("click",()=>{
@@ -329,6 +323,11 @@ function injectLatestMemoStyles(){
     .memoCheckWrap{flex:0 0 24px;display:flex;align-items:center;justify-content:center}
     .memoItemSelected{background:#f4f8fc}
     .memoItemSelected .memoSubject{color:#173b67}
+    .memoPagination{display:flex;align-items:center;justify-content:center;gap:14px;padding:16px 0 2px;border-top:1px solid #e2e8f0;margin-top:4px}
+    .memoPageBtn{appearance:none;border:1px solid #cbd5e1;border-radius:9px;background:#fff;color:#173b67;font:600 13px Arial,sans-serif;padding:9px 20px;cursor:pointer;min-width:86px}
+    .memoPageBtn:hover:not(:disabled){background:#f4f8fc}
+    .memoPageBtn:disabled{color:#94a3b8;background:#f8fafc;cursor:not-allowed;opacity:.8}
+    .memoPageInfo{font-size:12px;color:#64748b;text-align:center}
     @media(max-width:650px){
       .memoItem{align-items:flex-start;flex-wrap:wrap}
       .memoCheckWrap{padding-top:3px}
@@ -359,13 +358,6 @@ function printRoutingSlipTime(value){
   const d=new Date(value);
   if(!Number.isNaN(d.getTime())) return d.toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"});
   return String(value);
-}
-
-function buildDocumentQrUrl(id){
-  const clean=String(id||"").trim();
-  if(!clean) return "";
-  const target=new URL("?id="+encodeURIComponent(clean),window.location.origin).toString();
-  return "https://quickchart.io/qr?text="+encodeURIComponent(target)+"&size=180";
 }
 
 function routingSlipRows(d){
@@ -431,9 +423,7 @@ function buildSingleRoutingSlipHtml(d){
           <div class="metaCell"><span class="metaLabel">Time In:</span><span class="metaValue">${esc(printRoutingSlipTime(receivedAt))}</span></div>
           <div class="metaCell"><span class="metaLabel">Prepared by:</span><span class="metaValue">${esc(preparedBy)}</span></div>
         </div>
-        <div class="metaQr" aria-label="QR code for document tracking">
-          <img src="${esc(buildDocumentQrUrl(d?.controlRefId||""))}" alt="QR code for ${esc(d?.controlRefId||"")}">
-        </div>
+        <div class="slipQr"><img src="${esc(`https://quickchart.io/qr?text=${encodeURIComponent(`${(window.RCD_CONFIG||{}).APP_URL||location.origin}?id=${encodeURIComponent(String(d?.controlRefId||''))}`)}&size=180`)}" alt="QR code for ${esc(d?.controlRefId||'document')}"></div>
       </div>
     </div>
     <div class="blankBand"></div>
@@ -478,7 +468,7 @@ function buildRoutingSlipHtml(documents){
   .slip{width:96mm;border:1px solid #000;background:#fff;font-family:Arial,Helvetica,sans-serif;font-size:5.9pt;line-height:1.03;overflow:hidden;break-inside:avoid}
   .title{height:5mm;background:#073d70 !important;color:#fff !important;border-bottom:1px solid #000;text-align:center;font-size:9.5pt;font-weight:700;letter-spacing:.15px;padding:.7mm;-webkit-print-color-adjust:exact;print-color-adjust:exact}
   .meta{display:grid;grid-template-columns:1fr 1.04fr;border-bottom:1px solid #000}
-  .metaLeft{border-right:1px solid #000}.metaCell{min-height:5.8mm;border-bottom:1px solid #000;padding:.55mm .8mm;font-size:5.8pt;display:flex;align-items:flex-start;gap:.8mm}.metaCell:last-child{border-bottom:0}.subjectCell{min-height:6.8mm}.controlCell{min-height:5.8mm}.metaRight{display:grid;grid-template-columns:minmax(0,1fr) 25mm;min-height:17.6mm}.metaInfo{min-width:0;border-right:1px solid #000}.metaRight .metaCell{display:flex;align-items:flex-start}.metaQr{display:flex;align-items:center;justify-content:center;padding:1.2mm}.metaQr img{display:block;width:21mm;height:21mm;object-fit:contain}.metaLabel{font-weight:400;white-space:nowrap}.metaValue{font-weight:600;flex:1;overflow-wrap:anywhere;word-break:break-word}
+  .metaLeft{border-right:1px solid #000}.metaCell{min-height:5.8mm;border-bottom:1px solid #000;padding:.55mm .8mm;font-size:5.8pt;display:flex;align-items:flex-start;gap:.8mm}.metaCell:last-child{border-bottom:0}.subjectCell{min-height:6.8mm}.controlCell{min-height:5.8mm}.metaRight{display:grid;grid-template-columns:1fr 25mm;min-width:0}.metaInfo{min-width:0}.metaRight .metaCell{display:flex;align-items:flex-start}.metaRight .metaInfo .metaCell:last-child{border-bottom:0}.slipQr{display:flex;align-items:center;justify-content:center;border-left:1px solid #000;padding:1.5mm}.slipQr img{width:20mm;height:20mm;max-width:100%;object-fit:contain;display:block}.metaLabel{font-weight:400;white-space:nowrap}.metaValue{font-weight:600;flex:1;overflow-wrap:anywhere;word-break:break-word}
   .blankBand{height:3.2mm;border-bottom:1px solid #000}
   table{width:100%;border-collapse:collapse;table-layout:fixed} col.nrCol{width:5.5mm}.particularsCol{width:21mm}.initialCol{width:9mm}.dateCol{width:11mm}.actionCol{width:18mm}.remarksCol{width:31.5mm}
   th{height:8.8mm;background:#073d70 !important;color:#fff !important;font-size:6.3pt;font-weight:700;text-align:center;padding:.6mm .3mm;border-right:1px solid #fff;border-bottom:1px solid #000;vertical-align:middle;-webkit-print-color-adjust:exact;print-color-adjust:exact} th:last-child{border-right:0}
@@ -908,21 +898,28 @@ async function openMemoModal(id,mode="view"){
   }
 }
 
-async function latestMemos(page=latestMemoPage){
-  const target=$("latestMemos");
-  if(!target)return;
-
-  latestMemoPage=Math.max(0,Number(page)||0);
-  const offset=latestMemoPage*latestMemoPageSize;
-  target.innerHTML='<div class="box loading">Loading memos...</div>';
-
+async function loadMemoPage(pageIndex, options={}){
+  const totalTarget=$("latestMemos");
+  if(!totalTarget)return;
+  const page=Math.max(0,Number(pageIndex)||0);
+  const sync=options.sync===true;
+  totalTarget.innerHTML='<div class="box loading">Loading memos...</div>';
   try{
-    const d=await apiAction("getDocuments",{limit:latestMemoPageSize,offset});
-    latestMemoTotal=Number(d?.total||0);
+    const d=await apiAction("getDocuments",{
+      limit:MEMOS_PER_PAGE,
+      offset:page*MEMOS_PER_PAGE,
+      sync:sync ? "true" : "false"
+    });
+    memoPage=Number(d.offset||0)/MEMOS_PER_PAGE;
     renderLatestMemos(d);
   }catch(e){
-    target.innerHTML=`<div class="error">Unable to load memos: ${esc(e.message)}</div>`;
+    totalTarget.innerHTML=`<div class="error">Unable to load memos: ${esc(e.message)}</div>`;
   }
+}
+
+async function latestMemos(){
+  memoPage=0;
+  return loadMemoPage(0,{sync:true});
 }
 
 async function dashboard(){
