@@ -2,6 +2,8 @@ let API_URL=(window.RCD_CONFIG||{}).API_URL||localStorage.getItem("RCD_API_URL")
 let current=null,scanner=null,jsonpCounter=0;
 let memoPage=0;
 const MEMOS_PER_PAGE=20;
+const MEMOS_FETCH_SIZE=100;
+const memoPageCache=new Map();
 const selectedMemoIds=new Set();
 const memoDataById=new Map();
 
@@ -201,19 +203,13 @@ function renderLatestMemos(data){
   }
 
   let rows=Array.isArray(data.documents)?data.documents:[];
+  const total=Number(data.total ?? rows.length) || 0;
   const offset=Number(data.offset ?? (memoPage*MEMOS_PER_PAGE)) || 0;
-  const limit=MEMOS_PER_PAGE;
-
-  // Some Apps Script responses report the number of rows returned as `total`
-  // instead of the database total. Never disable Next just because that value
-  // happens to be 20. The page itself is the reliable signal when it is full.
-  const reportedTotal=Number(data.total);
-  const fullPage=rows.length>=MEMOS_PER_PAGE;
-  const hasPrevious=offset>0;
-  const hasNext=fullPage || (Number.isFinite(reportedTotal) && reportedTotal>offset+rows.length);
-  const pageNumber=Math.floor(offset/MEMOS_PER_PAGE)+1;
-  const totalKnown=Number.isFinite(reportedTotal) && reportedTotal>offset+rows.length;
-  const totalPages=totalKnown ? Math.max(pageNumber,Math.ceil(reportedTotal/MEMOS_PER_PAGE)) : null;
+  const limit=Number(data.limit ?? MEMOS_PER_PAGE) || MEMOS_PER_PAGE;
+  const pageNumber=Math.floor(offset/limit)+1;
+  const totalPages=Math.max(1,Math.ceil(total/limit));
+  const hasPrevious=Boolean(data.hasPrevious ?? offset>0);
+  const hasNext=Boolean(data.hasNext ?? (offset+limit<total));
 
   rows=rows.map((d,index)=>({...d,__index:index}));
 
@@ -258,13 +254,9 @@ function renderLatestMemos(data){
     </div>`;
   }).join("") : '<p class="muted">No memos found.</p>';
 
-  const showingStart=rows.length ? offset+1 : 0;
-  const showingEnd=rows.length ? offset+rows.length : 0;
-  const pageLabel=totalPages ? `Page ${pageNumber} of ${totalPages}` : `Page ${pageNumber}`;
-  const totalLabel=totalKnown ? ` of ${reportedTotal}` : ` of more`;
   const pagination=`<div class="memoPagination">
     <button type="button" class="memoPageBtn" id="memoPrev" ${hasPrevious?'':'disabled'}>Back</button>
-    <span class="memoPageInfo">${pageLabel} · Showing ${showingStart}-${showingEnd}${totalLabel}</span>
+    <span class="memoPageInfo">Page ${pageNumber} of ${totalPages} · Showing ${total ? offset+1 : 0}-${Math.min(offset+rows.length,total)} of ${total}</span>
     <button type="button" class="memoPageBtn" id="memoNext" ${hasNext?'':'disabled'}>Next</button>
   </div>`;
 
@@ -912,25 +904,44 @@ async function loadMemoPage(pageIndex, options={}){
   const totalTarget=$("latestMemos");
   if(!totalTarget)return;
   const page=Math.max(0,Number(pageIndex)||0);
-  const sync=options.sync===true;
+  const block=Math.floor((page*MEMOS_PER_PAGE)/MEMOS_FETCH_SIZE)*MEMOS_FETCH_SIZE;
+  const indexInBlock=(page*MEMOS_PER_PAGE)-block;
   totalTarget.innerHTML='<div class="box loading">Loading memos...</div>';
   try{
-    const d=await apiAction("getDocuments",{
-      limit:MEMOS_PER_PAGE+1,
-      offset:page*MEMOS_PER_PAGE,
-      sync:sync ? "true" : "false"
+    let blockData=memoPageCache.get(block);
+    if(!blockData){
+      blockData=await apiAction("getDocuments",{
+        limit:MEMOS_FETCH_SIZE,
+        offset:block,
+        sync:"false"
+      });
+      memoPageCache.set(block,blockData);
+    }
+
+    const docs=Array.isArray(blockData.documents)?blockData.documents:[];
+    const pageDocs=docs.slice(indexInBlock,indexInBlock+MEMOS_PER_PAGE);
+    const total=Number(blockData.total)||0;
+    const actualOffset=page*MEMOS_PER_PAGE;
+    const hasPrevious=page>0;
+    const hasNext=actualOffset+pageDocs.length<total;
+
+    memoPage=page;
+    renderLatestMemos({
+      ...blockData,
+      documents:pageDocs,
+      total,
+      offset:actualOffset,
+      limit:MEMOS_PER_PAGE,
+      hasPrevious,
+      hasNext
     });
-    memoPage=Number(d.offset||0)/MEMOS_PER_PAGE;
-    const docs=Array.isArray(d.documents)?d.documents:[];
-    const hasProbeNext=docs.length>MEMOS_PER_PAGE;
-    const pageDocs=docs.slice(0,MEMOS_PER_PAGE);
-    renderLatestMemos({...d,documents:pageDocs,hasNext:hasProbeNext || Boolean(d.hasNext)});
   }catch(e){
     totalTarget.innerHTML=`<div class="error">Unable to load memos: ${esc(e.message)}</div>`;
   }
 }
 
 async function latestMemos(){
+  memoPageCache.clear();
   memoPage=0;
   // Do not run the full source-to-target sync on every page load.
   // Automatic Apps Script triggers handle synchronization.
