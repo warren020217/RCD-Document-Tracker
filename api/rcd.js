@@ -1,6 +1,5 @@
 
 const RCD_API =
-  process.env.RCD_APPS_SCRIPT_URL ||
   "https://script.google.com/macros/s/AKfycbwNbiLs-1zEfgB9BYmJk7QRKjfu-g01QwtrwxHV5o9hl_F5k3-QUpjkiTl0xE5cIfHjXg/exec";
 
 module.exports = async function handler(req, res) {
