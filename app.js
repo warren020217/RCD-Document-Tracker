@@ -1,7 +1,7 @@
 let API_URL=(window.RCD_CONFIG||{}).API_URL||localStorage.getItem("RCD_API_URL")||"/api/rcd";
 let current=null,scanner=null,jsonpCounter=0;
 let memoPage=0;
-const MEMOS_PER_PAGE=1000;
+const MEMOS_PER_PAGE=5000;
 const selectedMemoIds=new Set();
 const memoDataById=new Map();
 
@@ -202,7 +202,6 @@ function renderLatestMemos(data){
 
   let rows=Array.isArray(data.documents)?data.documents:[];
   const total=rows.length;
-  const offset=0;
 
   rows=rows.map((d,index)=>({...d,__index:index}));
 
@@ -250,7 +249,7 @@ function renderLatestMemos(data){
   target.innerHTML=`${batchBar}
     <div class="memoSelectAllRow">
       <label><input type="checkbox" id="latestSelectAll" ${allChecked?'checked':''}> Select all visible</label>
-      <span>${rows.length.toLocaleString()} memo${rows.length===1?'':'s'}</span>
+      <span>${rows.length.toLocaleString()} memos</span>
       ${count?`<span>${count} selected</span>`:""}
     </div>
     <div class="memoListScroll">${listHtml}</div>`;
@@ -309,14 +308,6 @@ function injectLatestMemoStyles(){
     .memoCheckWrap{flex:0 0 24px;display:flex;align-items:center;justify-content:center}
     .memoItemSelected{background:#f4f8fc}
     .memoItemSelected .memoSubject{color:#173b67}
-    .memoPagination{display:flex;align-items:center;justify-content:center;gap:14px;padding:16px 0 2px;border-top:1px solid #e2e8f0;margin-top:4px}
-    .memoPageBtn{appearance:none;border:1px solid #cbd5e1;border-radius:9px;background:#fff;color:#173b67;font:600 13px Arial,sans-serif;padding:9px 20px;cursor:pointer;min-width:86px}
-    .memoPageBtn:hover:not(:disabled){background:#f4f8fc}
-    .memoPageBtn:disabled{color:#94a3b8;background:#f8fafc;cursor:not-allowed;opacity:.8}
-    .memoPageInfo{font-size:12px;color:#64748b;text-align:center}
-    .memoListScroll{max-height:620px;overflow-y:auto;overflow-x:hidden;border-top:1px solid #e2e8f0}
-    .memoListScroll .memoItem{padding:14px 0;border-bottom:1px solid #e2e8f0}
-    .memoListScroll .memoItem:last-child{border-bottom:0}
     @media(max-width:650px){
       .memoItem{align-items:flex-start;flex-wrap:wrap}
       .memoCheckWrap{padding-top:3px}
@@ -907,6 +898,8 @@ async function loadMemoPage(pageIndex, options={}){
 
 async function latestMemos(){
   memoPage=0;
+  // Do not run the full source-to-target sync on every page load.
+  // Automatic Apps Script triggers handle synchronization.
   return loadMemoPage(0,{sync:false});
 }
 
