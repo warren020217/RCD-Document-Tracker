@@ -346,6 +346,13 @@ function printRoutingSlipTime(value){
   return String(value);
 }
 
+function buildDocumentQrUrl(id){
+  const clean=String(id||"").trim();
+  if(!clean) return "";
+  const target=new URL("?id="+encodeURIComponent(clean),window.location.origin).toString();
+  return "https://quickchart.io/qr?text="+encodeURIComponent(target)+"&size=180";
+}
+
 function routingSlipRows(d){
   const names=[
     "Asst. C, RCD/C,ADMIN",
@@ -404,9 +411,14 @@ function buildSingleRoutingSlipHtml(d){
         <div class="metaCell controlCell"><span class="metaLabel">Control No.:</span><span class="metaValue">${esc(d?.controlRefId||"")}</span></div>
       </div>
       <div class="metaRight">
-        <div class="metaCell"><span class="metaLabel">Date:</span><span class="metaValue">${esc(printRoutingSlipDate(receivedAt))}</span></div>
-        <div class="metaCell"><span class="metaLabel">Time In:</span><span class="metaValue">${esc(printRoutingSlipTime(receivedAt))}</span></div>
-        <div class="metaCell"><span class="metaLabel">Prepared by:</span><span class="metaValue">${esc(preparedBy)}</span></div>
+        <div class="metaInfo">
+          <div class="metaCell"><span class="metaLabel">Date:</span><span class="metaValue">${esc(printRoutingSlipDate(receivedAt))}</span></div>
+          <div class="metaCell"><span class="metaLabel">Time In:</span><span class="metaValue">${esc(printRoutingSlipTime(receivedAt))}</span></div>
+          <div class="metaCell"><span class="metaLabel">Prepared by:</span><span class="metaValue">${esc(preparedBy)}</span></div>
+        </div>
+        <div class="metaQr" aria-label="QR code for document tracking">
+          <img src="${esc(buildDocumentQrUrl(d?.controlRefId||""))}" alt="QR code for ${esc(d?.controlRefId||"")}">
+        </div>
       </div>
     </div>
     <div class="blankBand"></div>
@@ -451,7 +463,7 @@ function buildRoutingSlipHtml(documents){
   .slip{width:96mm;border:1px solid #000;background:#fff;font-family:Arial,Helvetica,sans-serif;font-size:5.9pt;line-height:1.03;overflow:hidden;break-inside:avoid}
   .title{height:5mm;background:#073d70 !important;color:#fff !important;border-bottom:1px solid #000;text-align:center;font-size:9.5pt;font-weight:700;letter-spacing:.15px;padding:.7mm;-webkit-print-color-adjust:exact;print-color-adjust:exact}
   .meta{display:grid;grid-template-columns:1fr 1.04fr;border-bottom:1px solid #000}
-  .metaLeft{border-right:1px solid #000}.metaCell{min-height:5.8mm;border-bottom:1px solid #000;padding:.55mm .8mm;font-size:5.8pt;display:flex;align-items:flex-start;gap:.8mm}.metaCell:last-child{border-bottom:0}.subjectCell{min-height:6.8mm}.controlCell{min-height:5.8mm}.metaRight .metaCell{display:flex;align-items:flex-start}.metaLabel{font-weight:400;white-space:nowrap}.metaValue{font-weight:600;flex:1;overflow-wrap:anywhere;word-break:break-word}
+  .metaLeft{border-right:1px solid #000}.metaCell{min-height:5.8mm;border-bottom:1px solid #000;padding:.55mm .8mm;font-size:5.8pt;display:flex;align-items:flex-start;gap:.8mm}.metaCell:last-child{border-bottom:0}.subjectCell{min-height:6.8mm}.controlCell{min-height:5.8mm}.metaRight{display:grid;grid-template-columns:minmax(0,1fr) 25mm;min-height:17.6mm}.metaInfo{min-width:0;border-right:1px solid #000}.metaRight .metaCell{display:flex;align-items:flex-start}.metaQr{display:flex;align-items:center;justify-content:center;padding:1.2mm}.metaQr img{display:block;width:21mm;height:21mm;object-fit:contain}.metaLabel{font-weight:400;white-space:nowrap}.metaValue{font-weight:600;flex:1;overflow-wrap:anywhere;word-break:break-word}
   .blankBand{height:3.2mm;border-bottom:1px solid #000}
   table{width:100%;border-collapse:collapse;table-layout:fixed} col.nrCol{width:5.5mm}.particularsCol{width:21mm}.initialCol{width:9mm}.dateCol{width:11mm}.actionCol{width:18mm}.remarksCol{width:31.5mm}
   th{height:8.8mm;background:#073d70 !important;color:#fff !important;font-size:6.3pt;font-weight:700;text-align:center;padding:.6mm .3mm;border-right:1px solid #fff;border-bottom:1px solid #000;vertical-align:middle;-webkit-print-color-adjust:exact;print-color-adjust:exact} th:last-child{border-right:0}
@@ -886,7 +898,7 @@ async function latestMemos(){
   if(!target)return;
   target.innerHTML='<div class="box loading">Loading latest memos...</div>';
   try{
-    const d=await apiAction("getDocuments",{limit:20,sync:"true"});
+    const d=await apiAction("getDocuments",{limit:20});
     renderLatestMemos(d);
   }catch(e){
     target.innerHTML=`<div class="error">Unable to load latest memos: ${esc(e.message)}</div>`;
