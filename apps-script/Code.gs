@@ -12,6 +12,7 @@
 const CONFIG = {
   SOURCE_SPREADSHEET_ID: "18GuL5EwafykdUrTBmQKBdQfMIv1BDtios5K-xHjTG1k",
   SOURCE_SHEET_NAME: "Memo Logbook",
+  TARGET_SPREADSHEET_ID: "1P64c1lajVbIXyW8deBBwY-od_kseMfk5Y8LXj5ba04I",
 
   DOCUMENTS: "DOCUMENTS",
   MOVEMENT: "MOVEMENT LOG",
@@ -163,6 +164,7 @@ function onOpen() {
     .addItem("2. Sync Existing Memo Logbook","syncDocuments")
     .addItem("3. Generate Missing QR Codes","generateQRCodes")
     .addItem("4. Install Automatic Sync","installAutomaticSync")
+    .addItem("5. Test Sync Connection","testSyncConnection")
     .addToUi();
 }
 
@@ -213,7 +215,7 @@ function setupDatabase() {
   settings.getRange(2,1,5,2).setValues([
     ["Source Spreadsheet ID",CONFIG.SOURCE_SPREADSHEET_ID],
     ["Source Sheet",CONFIG.SOURCE_SHEET_NAME],
-    ["Routing Database Spreadsheet ID",ss.getId()],
+    ["Routing Database Spreadsheet ID",CONFIG.TARGET_SPREADSHEET_ID],
     ["Web App URL",CONFIG.WEB_APP_URL],
     ["Website URL",CONFIG.APP_URL]
   ]);
@@ -237,164 +239,213 @@ function syncDocuments() {
   syncDocuments_(true);
 }
 
+function getSourceSheet_(sourceSS) {
+  const exact = sourceSS.getSheetByName(CONFIG.SOURCE_SHEET_NAME);
+  if (exact) return exact;
+
+  const sheets = sourceSS.getSheets();
+  if (!sheets.length) throw new Error("Source spreadsheet has no sheets.");
+
+  // If the tab was renamed, use the first non-empty sheet rather than silently
+  // failing. The chosen sheet name is written to the sync log for diagnosis.
+  const candidate = sheets.find(sh => sh.getLastRow() > 1 && sh.getLastColumn() > 1);
+  if (candidate) return candidate;
+  return sheets[0];
+}
+
+function getControlRefId_(headers, row) {
+  // Prefer a header named Control Ref ID if present. Otherwise retain the
+  // original project convention where Control Ref ID is column B.
+  const normalized = (headers || []).map(h => String(h || '').trim().toLowerCase());
+  const idx = normalized.findIndex(h =>
+    h === 'control ref id' || h === 'control reference id' || h === 'control ref. id'
+  );
+  const value = idx >= 0 ? row[idx] : row[1];
+  return String(value || '').trim();
+}
+
+function testSyncConnection() {
+  const targetSS = SpreadsheetApp.openById(CONFIG.TARGET_SPREADSHEET_ID);
+  const sourceSS = SpreadsheetApp.openById(CONFIG.SOURCE_SPREADSHEET_ID);
+  const source = getSourceSheet_(sourceSS);
+  const target = targetSS.getSheetByName(CONFIG.DOCUMENTS);
+
+  const sourceLastRow = source.getLastRow();
+  const targetLastRow = target ? target.getLastRow() : 0;
+  const sourceValues = sourceLastRow > 1
+    ? source.getRange(1,1,sourceLastRow,Math.max(2,source.getLastColumn())).getValues()
+    : [];
+  const targetValues = targetLastRow > 1
+    ? target.getRange(2,1,targetLastRow-1,20).getValues()
+    : [];
+  const sourceLastId = sourceValues.length ? getControlRefId_(sourceValues[0], sourceValues[sourceValues.length-1]) : '';
+  const targetLastId = targetValues.length ? String(targetValues[targetValues.length-1][0] || '') : '';
+
+  const msg = [
+    'SYNC CONNECTION TEST',
+    '',
+    'Source spreadsheet: OK',
+    'Source sheet: ' + source.getName(),
+    'Source last row: ' + sourceLastRow,
+    'Source latest Control Ref ID: ' + sourceLastId,
+    '',
+    'Target spreadsheet: OK',
+    'Target DOCUMENTS last row: ' + targetLastRow,
+    'Target last Control Ref ID: ' + targetLastId,
+    '',
+    'If Source last row / ID is newer than Target, run Sync Existing Memo Logbook.'
+  ].join('\n');
+
+  const log = targetSS.getSheetByName(CONFIG.SYNC_LOG);
+  if (log) log.appendRow([new Date(), 'CONNECTION TEST', sourceLastRow, targetLastRow]);
+  SpreadsheetApp.getUi().alert(msg);
+  return {result:'success', sourceSheet:source.getName(), sourceLastRow, sourceLastId, targetLastRow, targetLastId};
+}
+
 function syncDocuments_(showAlert) {
   const lock = LockService.getScriptLock();
-  if (!lock.tryLock(10000)) {
+  if (!lock.tryLock(15000)) {
     if (showAlert) SpreadsheetApp.getUi().alert("Another sync is already running. Please wait.");
     return {result:"error", message:"Another sync is already running."};
   }
 
   try {
-    const targetSS = SpreadsheetApp.getActiveSpreadsheet();
+    const targetSS = SpreadsheetApp.openById(CONFIG.TARGET_SPREADSHEET_ID);
     const sourceSS = SpreadsheetApp.openById(CONFIG.SOURCE_SPREADSHEET_ID);
-    const source = sourceSS.getSheetByName(CONFIG.SOURCE_SHEET_NAME) || sourceSS.getSheets()[0];
+    const source = getSourceSheet_(sourceSS);
+    const target = targetSS.getSheetByName(CONFIG.DOCUMENTS);
 
     if (!source) throw new Error("Source sheet was not found.");
-    const sourceData = source.getDataRange().getValues();
-
-    const target = targetSS.getSheetByName(CONFIG.DOCUMENTS);
     if (!target) throw new Error("Run setupDatabase() first.");
 
-    if (sourceData.length < 2) {
+    const sourceLastRow = source.getLastRow();
+    const sourceLastCol = Math.max(source.getLastColumn(), 13);
+    if (sourceLastRow < 2) {
       const result = {result:"success", message:"No memo records found.", recordsFound:0, added:0, updated:0};
       if (showAlert) SpreadsheetApp.getUi().alert(result.message);
       return result;
     }
 
-    /*
-     * IMPORTANT:
-     * Columns N:T belong to the routing system. They must never be overwritten
-     * by source synchronization. Only source columns A:M are refreshed.
-     *
-     * The old implementation rebuilt the entire target table from the source.
-     * That made synchronization fragile and could overwrite routing state.
-     */
+    const sourceData = source.getRange(1, 1, sourceLastRow, sourceLastCol).getValues();
     const targetLastRow = target.getLastRow();
     const targetRows = targetLastRow > 1
-      ? target.getRange(2,1,targetLastRow-1,20).getValues()
+      ? target.getRange(2, 1, targetLastRow - 1, 20).getValues()
       : [];
 
-    // Match by Control Ref ID first. Source Row is used as a fallback so
-    // duplicate control references are not silently collapsed.
-    const targetById = {};
-    targetRows.forEach((r,i) => {
-      const id = String(r[0] || "").trim();
-      if (!id) return;
-      if (!targetById[id]) targetById[id] = [];
-      targetById[id].push(i + 2);
+    const targetById = Object.create(null);
+    const targetBySourceRow = Object.create(null);
+    targetRows.forEach((row, i) => {
+      const targetRowNumber = i + 2;
+      const id = String(row[0] || "").trim();
+      const sourceRow = Number(row[1]);
+      if (id && targetById[id] == null) targetById[id] = targetRowNumber;
+      if (sourceRow > 1 && targetBySourceRow[sourceRow] == null) targetBySourceRow[sourceRow] = targetRowNumber;
     });
 
-    const existingSourceRows = {};
-    targetRows.forEach((r,i) => {
-      const sourceRow = Number(r[1]);
-      if (sourceRow > 1) existingSourceRows[sourceRow] = i + 2;
-    });
-
-    const now = new Date();
-    const sourceRowsToKeep = new Set();
+    const updates = [];
     const newRows = [];
-    const newQrIds = [];
-    let added = 0;
-    let updated = 0;
+    const newIds = [];
+    const now = new Date();
+    let recordsFound = 0;
 
     for (let r = 1; r < sourceData.length; r++) {
-      const row = sourceData[r];
       const sourceRowNumber = r + 1;
-      const id = String(row[1] || "").trim();
+      const sourceRow = sourceData[r];
+      const id = getControlRefId_(sourceData[0], sourceRow);
       if (!id) continue;
+      recordsFound++;
 
-      sourceRowsToKeep.add(sourceRowNumber);
+      const sourcePart = [
+        id,
+        sourceRowNumber,
+        sourceRow[2], sourceRow[3], sourceRow[4], sourceRow[5], sourceRow[6],
+        sourceRow[7], sourceRow[8], sourceRow[9], sourceRow[10], sourceRow[11], sourceRow[12]
+      ];
 
-      let targetRowNumber = existingSourceRows[sourceRowNumber] || null;
-
-      // If the source row number changed, reuse the first target row with
-      // the same Control Ref ID that is not already assigned to this source row.
-      if (!targetRowNumber && targetById[id]) {
-        targetRowNumber = targetById[id].find(rowNum => {
-          const currentSourceRow = Number(target.getRange(rowNum,2).getValue() || 0);
-          return !sourceRowsToKeep.has(currentSourceRow);
-        }) || null;
-      }
+      let targetRowNumber = targetById[id] || null;
+      if (!targetRowNumber) targetRowNumber = targetBySourceRow[sourceRowNumber] || null;
 
       if (targetRowNumber) {
-        const old = target.getRange(targetRowNumber,1,1,20).getValues()[0];
-
-        // Preserve routing state in N:T. Refresh only A:M.
-        const sourcePart = [
-          id, sourceRowNumber, row[2], row[3], row[4], row[5], row[6],
-          row[7], row[8], row[9], row[10], row[11], row[12]
-        ];
-
-        const oldSourcePart = old.slice(0,13);
-        const sourceChanged = JSON.stringify(oldSourcePart) !== JSON.stringify(sourcePart);
-
-        target.getRange(targetRowNumber,1,1,13).setValues([sourcePart]);
-
-        if (sourceChanged) {
-          target.getRange(targetRowNumber,20).setValue(now);
-          updated++;
+        const old = targetRows[targetRowNumber - 2];
+        let changed = false;
+        for (let c = 0; c < 13; c++) {
+          const a = old[c] instanceof Date ? old[c].getTime() : old[c];
+          const b = sourcePart[c] instanceof Date ? sourcePart[c].getTime() : sourcePart[c];
+          if (String(a ?? "") !== String(b ?? "")) {
+            changed = true;
+            break;
+          }
         }
+        if (changed) updates.push({row: targetRowNumber, values: sourcePart});
       } else {
-        // New source record. Default routing fields are initialized once.
-        const output = [
-          id, sourceRowNumber, row[2], row[3], row[4], row[5], row[6],
-          row[7], row[8], row[9], row[10], row[11], row[12],
+        newRows.push([
+          ...sourcePart,
           "Message Center",
-          row[4] || "",
+          sourceRow[4] || "",
           "At Message Center",
           "",
           "",
           "",
           now
-        ];
-
-        newRows.push(output);
-        newQrIds.push(id);
-        added++;
+        ]);
+        newIds.push(id);
       }
     }
 
-    // Add all new records in one batch. This keeps first-time synchronization
-    // fast even when the source contains hundreds of memos.
-    if (newRows.length) {
-      const firstNewRow = target.getLastRow() + 1;
-      target.getRange(firstNewRow,1,newRows.length,20).setValues(newRows);
-      target.getRange(firstNewRow,19,newRows.length,1)
-        .setFormulas(newQrIds.map(id => [qrFormula_(id)]));
+    // Update existing source fields in contiguous groups. Routing columns N:T
+    // are never overwritten by synchronization.
+    updates.sort((a,b) => a.row - b.row);
+    let updated = 0;
+    let i = 0;
+    while (i < updates.length) {
+      let j = i + 1;
+      while (j < updates.length && updates[j].row === updates[j - 1].row + 1) j++;
+      const group = updates.slice(i, j);
+      target.getRange(group[0].row, 1, group.length, 13).setValues(group.map(x => x.values));
+      updated += group.length;
+      i = j;
     }
 
-    /*
-     * Do not delete target rows automatically.
-     * The routing database is a historical record and may contain routing
-     * information even if a source row is later removed or archived.
-     */
-    const log = targetSS.getSheetByName(CONFIG.SYNC_LOG);
-    if (log) log.appendRow([now,"SYNC",added,updated]);
+    // Append new records in small chunks. A QR formula failure must never
+    // prevent the memo itself from being imported.
+    let added = 0;
+    const CHUNK = 25;
+    for (let start = 0; start < newRows.length; start += CHUNK) {
+      const chunk = newRows.slice(start, start + CHUNK);
+      const chunkIds = newIds.slice(start, start + CHUNK);
+      const firstNewRow = target.getLastRow() + 1;
 
-    buildDashboard_();
-    SpreadsheetApp.flush();
+      target.getRange(firstNewRow, 1, chunk.length, 20).setValues(chunk);
+      SpreadsheetApp.flush();
+      added += chunk.length;
+
+      try {
+        target.getRange(firstNewRow, 19, chunk.length, 1)
+          .setFormulas(chunkIds.map(id => [qrFormula_(id)]));
+      } catch (qrErr) {
+        console.warn("QR formula generation skipped: " + qrErr);
+      }
+    }
+
+    const log = targetSS.getSheetByName(CONFIG.SYNC_LOG);
+    if (log) log.appendRow([now, "SYNC", added, updated]);
 
     const result = {
       result:"success",
-      message:"Synchronization completed.",
-      recordsFound:sourceRowsToKeep.size,
-      added:added,
-      updated:updated,
-      syncedAt:now
+      message:`Sync completed. ${added} new record(s), ${updated} updated record(s).`,
+      recordsFound,
+      added,
+      updated,
+      sourceLastRow,
+      targetLastRow: target.getLastRow()
     };
-
-    if (showAlert) {
-      SpreadsheetApp.getUi().alert(
-        "Synchronization completed.\n\n" +
-        "Records found: " + result.recordsFound +
-        "\nNew records: " + added +
-        "\nUpdated records: " + updated +
-        "\nTarget rows preserved: " + Math.max(0, target.getLastRow() - 1)
-      );
-    }
-
+    if (showAlert) SpreadsheetApp.getUi().alert(result.message);
     return result;
-
+  } catch (err) {
+    console.error(err && err.stack ? err.stack : err);
+    const message = err && err.message ? err.message : String(err);
+    if (showAlert) SpreadsheetApp.getUi().alert("Sync failed: " + message);
+    return {result:"error", message};
   } finally {
     lock.releaseLock();
   }
@@ -407,7 +458,7 @@ function qrFormula_(id) {
 }
 
 function generateQRCodes() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.DOCUMENTS);
+  const sheet = SpreadsheetApp.openById(CONFIG.TARGET_SPREADSHEET_ID).getSheetByName(CONFIG.DOCUMENTS);
   if (!sheet) throw new Error("Run setupDatabase() first.");
 
   const n = sheet.getLastRow() - 1;
@@ -426,7 +477,7 @@ function getDocument_(id) {
   id = String(id || "").trim();
   if (!id) return {result:"error", message:"Control Ref ID is required."};
 
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.DOCUMENTS);
+  const sheet = SpreadsheetApp.openById(CONFIG.TARGET_SPREADSHEET_ID).getSheetByName(CONFIG.DOCUMENTS);
   if (!sheet || sheet.getLastRow() < 2) {
     return {result:"error", message:"No documents are available."};
   }
@@ -464,7 +515,7 @@ function getDocument_(id) {
 }
 
 function getDocuments_(limit) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.DOCUMENTS);
+  const sheet = SpreadsheetApp.openById(CONFIG.TARGET_SPREADSHEET_ID).getSheetByName(CONFIG.DOCUMENTS);
   if (!sheet || sheet.getLastRow() < 2) {
     return {result:"success", documents:[]};
   }
@@ -506,7 +557,7 @@ function getDocuments_(limit) {
 }
 
 function getMetrics_() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.DOCUMENTS);
+  const sheet = SpreadsheetApp.openById(CONFIG.TARGET_SPREADSHEET_ID).getSheetByName(CONFIG.DOCUMENTS);
   if (!sheet || sheet.getLastRow() < 2) {
     return {total:0,messageCenter:0,forwarded:0,completed:0};
   }
@@ -535,7 +586,7 @@ function routeDocument_(id,movement,section,personnel,remarks) {
   id = String(id || "").trim();
   movement = String(movement || "").trim().toUpperCase();
 
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.DOCUMENTS);
+  const sheet = SpreadsheetApp.openById(CONFIG.TARGET_SPREADSHEET_ID).getSheetByName(CONFIG.DOCUMENTS);
   if (!sheet || sheet.getLastRow() < 2) return {result:"error",message:"No documents available."};
 
   const values = sheet.getRange(2,1,sheet.getLastRow()-1,20).getValues();
@@ -580,7 +631,7 @@ function routeDocument_(id,movement,section,personnel,remarks) {
 }
 
 function addMovement_(id,dateTime,action,fromSection,toSection,personnel,remarks) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.MOVEMENT);
+  const sheet = SpreadsheetApp.openById(CONFIG.TARGET_SPREADSHEET_ID).getSheetByName(CONFIG.MOVEMENT);
   if (!sheet) return;
 
   sheet.appendRow([
@@ -591,7 +642,7 @@ function addMovement_(id,dateTime,action,fromSection,toSection,personnel,remarks
 }
 
 function getMovementHistory_(id) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.MOVEMENT);
+  const sheet = SpreadsheetApp.openById(CONFIG.TARGET_SPREADSHEET_ID).getSheetByName(CONFIG.MOVEMENT);
   if (!sheet || sheet.getLastRow() < 2) return [];
 
   const values = sheet.getRange(2,1,sheet.getLastRow()-1,8).getValues();
@@ -650,9 +701,10 @@ function installAutomaticSync() {
   });
 
   // Near-real-time sync when a user edits the source Memo Logbook.
-  const sourceSS = SpreadsheetApp.openById(CONFIG.SOURCE_SPREADSHEET_ID);
+  // The trigger is attached to the SOURCE spreadsheet, while the script
+  // remains owned by the ROUTING DATABASE project.
   ScriptApp.newTrigger(handler)
-    .forSpreadsheet(sourceSS)
+    .forSpreadsheet(CONFIG.SOURCE_SPREADSHEET_ID)
     .onEdit()
     .create();
 
@@ -671,12 +723,19 @@ function installAutomaticSync() {
 }
 
 function syncDocumentsAutomatic_() {
-  syncDocuments_(false);
+  try {
+    syncDocuments_(false);
+  } catch (err) {
+    const targetSS = SpreadsheetApp.openById(CONFIG.TARGET_SPREADSHEET_ID);
+    const log = targetSS.getSheetByName(CONFIG.SYNC_LOG);
+    if (log) log.appendRow([new Date(), 'SYNC ERROR', String(err), '']);
+    throw err;
+  }
 }
 
 /**************** HELPERS ****************/
 
 function getOrCreateSheet_(name) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = SpreadsheetApp.openById(CONFIG.TARGET_SPREADSHEET_ID);
   return ss.getSheetByName(name) || ss.insertSheet(name);
 }
