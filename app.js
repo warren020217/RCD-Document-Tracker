@@ -173,7 +173,9 @@ async function startScan(){
       scanner=null;
       let id=text;
       try{id=new URL(text).searchParams.get("id")||text}catch{}
-      page("track");$("trackId").value=id;find(id,$("result"));
+      // A QR scan opens the document with routing actions enabled so the
+      // user can immediately forward it to another section/personnel.
+      page("track");$("trackId").value=id;find(id,$("result"),true);
     },()=>{});
     $("scanStatus").textContent="Point the camera at the QR code.";
   }catch(e){
@@ -941,7 +943,8 @@ window.addEventListener("load",()=>{
   if(id){
     page("track");
     $("trackId").value=id;
-    find(id,$("result"));
+    // QR-linked document views also expose the routing actions.
+    find(id,$("result"),true);
   } else {
     dashboard();
     latestMemos();
