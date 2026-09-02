@@ -165,107 +165,21 @@ async function move(type){
 
 async function startScan(){
   if(scanner||!window.Html5Qrcode)return setTimeout(startScan,500);
-
-  const reader=$("reader");
-  const status=$("scanStatus");
-  if(!reader)return;
-
   scanner=new Html5Qrcode("reader");
-
   try{
-    /*
-     * Samsung-style scanning behavior:
-     * - rear camera
-     * - continuous autofocus where supported
-     * - high-resolution camera feed
-     * - wider detection area instead of a small fixed QR box
-     * - device optical/digital zoom when available
-     * - no forced 2.5x zoom, which can crop a nearby QR code
-     */
-    const width=Math.max(280, Math.min(520, reader.clientWidth||420));
-    const qrSize=Math.round(width*0.86);
-
-    await scanner.start(
-      {
-        facingMode:{ideal:"environment"}
-      },
-      {
-        fps:20,
-        qrbox:{width:qrSize,height:qrSize},
-        aspectRatio:1.7777778,
-        disableFlip:false,
-        videoConstraints:{
-          facingMode:{ideal:"environment"},
-          width:{ideal:1920,min:1280},
-          height:{ideal:1080,min:720},
-          frameRate:{ideal:30,max:60}
-        }
-      },
-      async text=>{
-        if(!text||!scanner)return;
-
-        // Stop immediately after the first valid QR result.
-        const active=scanner;
-        scanner=null;
-        try{await active.stop();}catch(_){}
-        try{active.clear();}catch(_){}
-
-        let id=text.trim();
-        try{
-          const url=new URL(id);
-          id=url.searchParams.get("id")||id;
-        }catch(_){}
-
-        page("track");
-        $("trackId").value=id;
-        find(id,$("result"),true);
-      },
-      ()=>{}
-    );
-
-    /*
-     * Configure the actual camera track after it starts.
-     * Continuous focus and a moderate zoom make a small QR readable
-     * while still behaving naturally when the QR is brought closer.
-     */
-    try{
-      const video=reader.querySelector("video");
-      const track=video?.srcObject?.getVideoTracks?.()[0];
-
-      if(video){
-        video.setAttribute("playsinline","");
-        video.setAttribute("autoplay","");
-        video.muted=true;
-      }
-
-      if(track){
-        const caps=track.getCapabilities?.()||{};
-        const advanced={};
-
-        if(caps.focusMode){
-          const modes=Array.isArray(caps.focusMode)?caps.focusMode:[];
-          if(modes.includes("continuous")) advanced.focusMode="continuous";
-          else if(modes.includes("single-shot")) advanced.focusMode="single-shot";
-        }
-
-        if(caps.zoom){
-          const min=Number(caps.zoom.min??1);
-          const max=Number(caps.zoom.max??min);
-          // A moderate zoom, similar to using the phone's QR scanner.
-          // Prefer 2x, but never exceed the camera's supported range.
-          advanced.zoom=Math.min(max,Math.max(min,2));
-        }
-
-        if(Object.keys(advanced).length){
-          await track.applyConstraints({advanced:[advanced]});
-        }
-      }
-    }catch(_){}
-
-    status.textContent="Point the camera at the QR code. Autofocus and camera zoom are enabled.";
+    await scanner.start({facingMode:"environment"},{fps:10,qrbox:{width:240,height:240}},async text=>{
+      try{await scanner.stop();}catch(_){}
+      try{scanner.clear();}catch(_){}
+      scanner=null;
+      let id=text;
+      try{id=new URL(text).searchParams.get("id")||text}catch{}
+      // A QR scan opens the document with routing actions enabled so the
+      // user can immediately forward it to another section/personnel.
+      page("track");$("trackId").value=id;find(id,$("result"),true);
+    },()=>{});
+    $("scanStatus").textContent="Point the camera at the QR code.";
   }catch(e){
-    scanner=null;
-    status.textContent="Camera access is unavailable. Enter the Control Ref ID manually.";
+    $("scanStatus").textContent="Camera access is unavailable. Enter the Control Ref ID manually.";
   }
 }
 
@@ -287,7 +201,20 @@ function renderLatestMemos(data){
   }
 
   let rows=Array.isArray(data.documents)?data.documents:[];
-  const total=Number(data.total ?? rows.length) || rows.length;
+
+  // Prevent the Latest Memos list from displaying the same document more
+  // than once when the API returns duplicate records for a control reference.
+  // The API result is newest-first, so keep the first occurrence.
+  const seenControlRefs=new Set();
+  rows=rows.filter(d=>{
+    const id=String(d?.controlRefId||"").trim();
+    if(!id)return true;
+    if(seenControlRefs.has(id))return false;
+    seenControlRefs.add(id);
+    return true;
+  });
+
+  const total=rows.length;
   rows=rows.map((d,index)=>({...d,__index:index}));
 
   rows.forEach(d=>{
@@ -1029,7 +956,8 @@ window.addEventListener("load",()=>{
   if(id){
     page("track");
     $("trackId").value=id;
-    find(id,$("result"));
+    // QR-linked document views also expose the routing actions.
+    find(id,$("result"),true);
   } else {
     dashboard();
     latestMemos();
