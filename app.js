@@ -165,40 +165,107 @@ async function move(type){
 
 async function startScan(){
   if(scanner||!window.Html5Qrcode)return setTimeout(startScan,500);
+
+  const reader=$("reader");
+  const status=$("scanStatus");
+  if(!reader)return;
+
   scanner=new Html5Qrcode("reader");
+
   try{
-    await scanner.start({facingMode:"environment"},{
-      fps:15,
-      qrbox:{width:300,height:300},
-      videoConstraints:{
-        facingMode:{ideal:"environment"},
-        width:{ideal:1920},
-        height:{ideal:1080}
-      }
-    },async text=>{
-      try{await scanner.stop();}catch(_){}
-      try{scanner.clear();}catch(_){}
-      scanner=null;
-      let id=text;
-      try{id=new URL(text).searchParams.get("id")||text}catch{}
-      page("track");$("trackId").value=id;find(id,$("result"));
-    },()=>{});
-    // Apply optical/digital camera zoom when the device exposes a zoom control.
-    // This makes small routing-slip QR codes easier to detect without changing
-    // the QR data or the document itself.
+    /*
+     * Samsung-style scanning behavior:
+     * - rear camera
+     * - continuous autofocus where supported
+     * - high-resolution camera feed
+     * - wider detection area instead of a small fixed QR box
+     * - device optical/digital zoom when available
+     * - no forced 2.5x zoom, which can crop a nearby QR code
+     */
+    const width=Math.max(280, Math.min(520, reader.clientWidth||420));
+    const qrSize=Math.round(width*0.86);
+
+    await scanner.start(
+      {
+        facingMode:{ideal:"environment"}
+      },
+      {
+        fps:20,
+        qrbox:{width:qrSize,height:qrSize},
+        aspectRatio:1.7777778,
+        disableFlip:false,
+        videoConstraints:{
+          facingMode:{ideal:"environment"},
+          width:{ideal:1920,min:1280},
+          height:{ideal:1080,min:720},
+          frameRate:{ideal:30,max:60}
+        }
+      },
+      async text=>{
+        if(!text||!scanner)return;
+
+        // Stop immediately after the first valid QR result.
+        const active=scanner;
+        scanner=null;
+        try{await active.stop();}catch(_){}
+        try{active.clear();}catch(_){}
+
+        let id=text.trim();
+        try{
+          const url=new URL(id);
+          id=url.searchParams.get("id")||id;
+        }catch(_){}
+
+        page("track");
+        $("trackId").value=id;
+        find(id,$("result"),true);
+      },
+      ()=>{}
+    );
+
+    /*
+     * Configure the actual camera track after it starts.
+     * Continuous focus and a moderate zoom make a small QR readable
+     * while still behaving naturally when the QR is brought closer.
+     */
     try{
-      const video=$('reader')?.querySelector('video');
+      const video=reader.querySelector("video");
       const track=video?.srcObject?.getVideoTracks?.()[0];
-      const caps=track?.getCapabilities?.();
-      if(track&&caps?.zoom){
-        const min=Number(caps.zoom.min??1), max=Number(caps.zoom.max??min);
-        const desired=Math.min(max,Math.max(min,2.5));
-        await track.applyConstraints({advanced:[{zoom:desired}]});
+
+      if(video){
+        video.setAttribute("playsinline","");
+        video.setAttribute("autoplay","");
+        video.muted=true;
+      }
+
+      if(track){
+        const caps=track.getCapabilities?.()||{};
+        const advanced={};
+
+        if(caps.focusMode){
+          const modes=Array.isArray(caps.focusMode)?caps.focusMode:[];
+          if(modes.includes("continuous")) advanced.focusMode="continuous";
+          else if(modes.includes("single-shot")) advanced.focusMode="single-shot";
+        }
+
+        if(caps.zoom){
+          const min=Number(caps.zoom.min??1);
+          const max=Number(caps.zoom.max??min);
+          // A moderate zoom, similar to using the phone's QR scanner.
+          // Prefer 2x, but never exceed the camera's supported range.
+          advanced.zoom=Math.min(max,Math.max(min,2));
+        }
+
+        if(Object.keys(advanced).length){
+          await track.applyConstraints({advanced:[advanced]});
+        }
       }
     }catch(_){}
-    $("scanStatus").textContent="Point the camera at the QR code. The scanner is zoomed for small QR codes.";
+
+    status.textContent="Point the camera at the QR code. Autofocus and camera zoom are enabled.";
   }catch(e){
-    $("scanStatus").textContent="Camera access is unavailable. Enter the Control Ref ID manually.";
+    scanner=null;
+    status.textContent="Camera access is unavailable. Enter the Control Ref ID manually.";
   }
 }
 
