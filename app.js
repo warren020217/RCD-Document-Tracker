@@ -201,7 +201,20 @@ function renderLatestMemos(data){
   }
 
   let rows=Array.isArray(data.documents)?data.documents:[];
-  const total=Number(data.total ?? rows.length) || rows.length;
+
+  // Prevent the Latest Memos list from displaying the same document more
+  // than once when the API returns duplicate records for a control reference.
+  // The API result is newest-first, so keep the first occurrence.
+  const seenControlRefs=new Set();
+  rows=rows.filter(d=>{
+    const id=String(d?.controlRefId||"").trim();
+    if(!id)return true;
+    if(seenControlRefs.has(id))return false;
+    seenControlRefs.add(id);
+    return true;
+  });
+
+  const total=rows.length;
   rows=rows.map((d,index)=>({...d,__index:index}));
 
   rows.forEach(d=>{
