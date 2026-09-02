@@ -167,17 +167,36 @@ async function startScan(){
   if(scanner||!window.Html5Qrcode)return setTimeout(startScan,500);
   scanner=new Html5Qrcode("reader");
   try{
-    await scanner.start({facingMode:"environment"},{fps:10,qrbox:{width:240,height:240}},async text=>{
+    await scanner.start({facingMode:"environment"},{
+      fps:15,
+      qrbox:{width:300,height:300},
+      videoConstraints:{
+        facingMode:{ideal:"environment"},
+        width:{ideal:1920},
+        height:{ideal:1080}
+      }
+    },async text=>{
       try{await scanner.stop();}catch(_){}
       try{scanner.clear();}catch(_){}
       scanner=null;
       let id=text;
       try{id=new URL(text).searchParams.get("id")||text}catch{}
-      // A QR scan opens the document with routing actions enabled so the
-      // user can immediately forward it to another section/personnel.
-      page("track");$("trackId").value=id;find(id,$("result"),true);
+      page("track");$("trackId").value=id;find(id,$("result"));
     },()=>{});
-    $("scanStatus").textContent="Point the camera at the QR code.";
+    // Apply optical/digital camera zoom when the device exposes a zoom control.
+    // This makes small routing-slip QR codes easier to detect without changing
+    // the QR data or the document itself.
+    try{
+      const video=$('reader')?.querySelector('video');
+      const track=video?.srcObject?.getVideoTracks?.()[0];
+      const caps=track?.getCapabilities?.();
+      if(track&&caps?.zoom){
+        const min=Number(caps.zoom.min??1), max=Number(caps.zoom.max??min);
+        const desired=Math.min(max,Math.max(min,2.5));
+        await track.applyConstraints({advanced:[{zoom:desired}]});
+      }
+    }catch(_){}
+    $("scanStatus").textContent="Point the camera at the QR code. The scanner is zoomed for small QR codes.";
   }catch(e){
     $("scanStatus").textContent="Camera access is unavailable. Enter the Control Ref ID manually.";
   }
@@ -201,20 +220,7 @@ function renderLatestMemos(data){
   }
 
   let rows=Array.isArray(data.documents)?data.documents:[];
-
-  // Prevent the Latest Memos list from displaying the same document more
-  // than once when the API returns duplicate records for a control reference.
-  // The API result is newest-first, so keep the first occurrence.
-  const seenControlRefs=new Set();
-  rows=rows.filter(d=>{
-    const id=String(d?.controlRefId||"").trim();
-    if(!id)return true;
-    if(seenControlRefs.has(id))return false;
-    seenControlRefs.add(id);
-    return true;
-  });
-
-  const total=rows.length;
+  const total=Number(data.total ?? rows.length) || rows.length;
   rows=rows.map((d,index)=>({...d,__index:index}));
 
   rows.forEach(d=>{
@@ -956,8 +962,7 @@ window.addEventListener("load",()=>{
   if(id){
     page("track");
     $("trackId").value=id;
-    // QR-linked document views also expose the routing actions.
-    find(id,$("result"),true);
+    find(id,$("result"));
   } else {
     dashboard();
     latestMemos();
