@@ -64,22 +64,9 @@ function isUuid(str) {
   return UUID_REGEX.test(String(str || "").trim());
 }
 
-function buildMemoQuery(rawId) {
-  const enc = encodeURIComponent(String(rawId || "").trim());
-  if (isUuid(rawId)) {
-    return `memos?or=(id.eq.${enc},memo_no.eq.${enc},legacy_id.eq.${enc})&limit=1`;
-  }
-  return `memos?or=(memo_no.eq.${enc},legacy_id.eq.${enc})&limit=1`;
-}
-
-function buildMemoIlikeQuery(rawId) {
-  const enc = encodeURIComponent(String(rawId || "").trim());
-  return `memos?or=(memo_no.ilike.${enc},legacy_id.ilike.${enc})&limit=1`;
-}
-
 let metricsCache = null;
 let metricsCacheTime = 0;
-const METRICS_TTL = 15000; // 15s in-memory cache
+const METRICS_TTL = 30000; // 30s cache
 
 async function supabaseFetch(endpoint, options = {}) {
   const url = `${SUPABASE_URL}/rest/v1/${endpoint.replace(/^\/+/, "")}`;
@@ -121,11 +108,94 @@ async function supabaseFetch(endpoint, options = {}) {
   return data;
 }
 
+/**
+ * Robust multi-strategy memo finder.
+ * Handles IDs with special characters: parentheses '(', ')', slashes, hyphens, and spaces.
+ */
+async function findMemoRecord(rawId) {
+  const cleanId = String(rawId || "").trim();
+  if (!cleanId) return null;
+  const enc = encodeURIComponent(cleanId);
+
+  // Strategy 1: Exact memo_no match
+  try {
+    const r1 = await supabaseFetch(`memos?memo_no=eq.${enc}&limit=1`);
+    if (r1 && r1.length) return r1[0];
+  } catch (_) {}
+
+  // Strategy 2: Exact legacy_id match
+  try {
+    const r2 = await supabaseFetch(`memos?legacy_id=eq.${enc}&limit=1`);
+    if (r2 && r2.length) return r2[0];
+  } catch (_) {}
+
+  // Strategy 3: UUID match if cleanId is a valid UUID
+  if (isUuid(cleanId)) {
+    try {
+      const r3 = await supabaseFetch(`memos?id=eq.${enc}&limit=1`);
+      if (r3 && r3.length) return r3[0];
+    } catch (_) {}
+  }
+
+  // Strategy 4: Case-insensitive ilike on memo_no
+  try {
+    const r4 = await supabaseFetch(`memos?memo_no=ilike.${enc}&limit=1`);
+    if (r4 && r4.length) return r4[0];
+  } catch (_) {}
+
+  // Strategy 5: Case-insensitive ilike on legacy_id
+  try {
+    const r5 = await supabaseFetch(`memos?legacy_id=ilike.${enc}&limit=1`);
+    if (r5 && r5.length) return r5[0];
+  } catch (_) {}
+
+  return null;
+}
+
+/**
+ * Calculates metrics exactly matching rcd-memo.vercel.app:
+ * - total: Total memos logged
+ * - pendingRcd: Inside RCD (Pending)
+ * - transmitted: Transmitted / Released
+ * - concurred: Concurred / Approved
+ */
+async function getDashboardMetrics() {
+  const all = [];
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    const rows = await supabaseFetch(
+      `memos?select=id,memo_no,remarks_status,transmitted_office,is_deleted&is_deleted=eq.false&limit=${pageSize}&offset=${from}`
+    );
+    if (Array.isArray(rows)) {
+      all.push(...rows);
+    }
+    if (!rows || rows.length < pageSize) break;
+  }
+
+  const total = all.length;
+  const pendingRcd = all.filter(
+    m => !(m.remarks_status === "Transmitted to" || (m.transmitted_office && m.transmitted_office.trim().length > 2))
+  ).length;
+  const transmitted = all.filter(
+    m => m.remarks_status === "Transmitted to" || (m.transmitted_office && m.transmitted_office.trim().length > 2)
+  ).length;
+  const concurred = all.filter(
+    m => (m.remarks_status || "").includes("Concur") || (m.remarks_status || "").includes("Approved") || (m.remarks_status || "").includes("Signed")
+  ).length;
+
+  return {
+    total,
+    messageCenter: pendingRcd, // Inside RCD (Pending)
+    forwarded: transmitted,    // Transmitted / Released
+    completed: concurred       // Concurred / Approved
+  };
+}
+
 function mapMemoToDoc(m, index = 0) {
   const controlRefId = m.memo_no || m.legacy_id || m.id;
   const rawStatus = String(m.workflow_status || "").toUpperCase();
 
-  let routingStatus = "At Message Center";
+  let routingStatus = "Inside RCD (Pending)";
   if (["COMPLETED", "APPROVED", "TRANSMITTED"].includes(rawStatus)) {
     routingStatus = "Completed";
   } else if (["ASSIGNED", "IN_PROCESS"].includes(rawStatus)) {
@@ -179,12 +249,11 @@ module.exports = async function handler(req, res) {
     const params = Object.assign({}, req.query || {}, body);
     const action = String(params.action || "").trim();
 
-    // 1. DASHBOARD METRICS
+    // 1. DASHBOARD METRICS (Exactly matching rcd-memo.vercel.app counts)
     if (action === "dashboard") {
       res.setHeader("Cache-Control", "public, s-maxage=10, stale-while-revalidate=59");
 
-      // Serve from memory cache if fresh
-      if (metricsCache && (Date.now() - metricsCacheTime < METRICS_TTL)) {
+      if (metricsCache && Date.now() - metricsCacheTime < METRICS_TTL) {
         return res.status(200).json({
           result: "success",
           metrics: metricsCache
@@ -192,43 +261,12 @@ module.exports = async function handler(req, res) {
       }
 
       try {
-        const rows = await supabaseFetch(
-          "memos?select=id,workflow_status,assigned_section&is_deleted=eq.false"
-        );
-        const list = Array.isArray(rows) ? rows : [];
-        let total = list.length;
-        let messageCenter = 0;
-        let forwarded = 0;
-        let completed = 0;
-
-        list.forEach(r => {
-          const st = String(r.workflow_status || "").toUpperCase();
-          if (["COMPLETED", "APPROVED", "TRANSMITTED"].includes(st)) {
-            completed++;
-          } else if (["ASSIGNED", "IN_PROCESS", "ACKNOWLEDGED"].includes(st)) {
-            forwarded++;
-          } else if (
-            r.assigned_section &&
-            r.assigned_section !== "RCD" &&
-            r.assigned_section !== "Message Center"
-          ) {
-            forwarded++;
-          } else {
-            messageCenter++;
-          }
-        });
-
-        metricsCache = {
-          total,
-          messageCenter,
-          forwarded,
-          completed
-        };
+        const metrics = await getDashboardMetrics();
+        metricsCache = metrics;
         metricsCacheTime = Date.now();
-
         return res.status(200).json({
           result: "success",
-          metrics: metricsCache
+          metrics
         });
       } catch (dbErr) {
         return res.status(200).json({
@@ -238,23 +276,45 @@ module.exports = async function handler(req, res) {
       }
     }
 
-    // 2. GET ALL / LATEST MEMOS (INCOMING & OUTGOING)
+    // 2. GET LATEST MEMOS (INCOMING & OUTGOING, DEDUPLICATED STRICTLY)
     if (action === "getDocuments") {
       res.setHeader("Cache-Control", "public, s-maxage=5, stale-while-revalidate=30");
       const limit = Math.min(Math.max(Number(params.limit) || 100, 1), 5000);
       const offset = Math.max(Number(params.offset) || 0, 0);
 
       try {
-        const endpoint = `memos?select=*&is_deleted=eq.false&order=date_logged.desc.nullslast,time_logged.desc.nullslast,created_at.desc.nullslast&limit=${limit}&offset=${offset}`;
+        const fetchLimit = Math.min(limit * 2, 5000);
+        const endpoint = `memos?select=*&is_deleted=eq.false&order=date_logged.desc.nullslast,time_logged.desc.nullslast,created_at.desc.nullslast&limit=${fetchLimit}&offset=${offset}`;
         const memos = await supabaseFetch(endpoint);
-        const docs = (Array.isArray(memos) ? memos : []).map((m, idx) =>
-          mapMemoToDoc(m, offset + idx)
-        );
+        const list = Array.isArray(memos) ? memos : [];
+
+        // Deduplicate strictly: no duplicate memo numbers or duplicate subjects on same date
+        const seenMemoNos = new Set();
+        const seenFingerprints = new Set();
+        const seenSubjectDate = new Set();
+        const uniqueDocs = [];
+
+        for (const m of list) {
+          const memoNo = String(m.memo_no || m.legacy_id || m.id || "").trim().toUpperCase();
+          const fp = String(m.duplicate_fingerprint || "").trim();
+          const subjDate = `${String(m.subject || "").trim().toLowerCase()}|${m.date_logged || ""}`;
+
+          if (memoNo && seenMemoNos.has(memoNo)) continue;
+          if (fp && seenFingerprints.has(fp)) continue;
+          if (subjDate.length > 5 && seenSubjectDate.has(subjDate)) continue;
+
+          if (memoNo) seenMemoNos.add(memoNo);
+          if (fp) seenFingerprints.add(fp);
+          if (subjDate.length > 5) seenSubjectDate.add(subjDate);
+
+          uniqueDocs.push(mapMemoToDoc(m, offset + uniqueDocs.length));
+          if (uniqueDocs.length >= limit) break;
+        }
 
         return res.status(200).json({
           result: "success",
-          documents: docs,
-          count: docs.length
+          documents: uniqueDocs,
+          count: uniqueDocs.length
         });
       } catch (dbErr) {
         return res.status(200).json({
@@ -276,29 +336,23 @@ module.exports = async function handler(req, res) {
       }
 
       try {
-        // Query safely without throwing uuid syntax errors on non-uuid strings
-        let rows = await supabaseFetch(buildMemoQuery(rawId));
-
-        // Fallback: Case-insensitive search
-        if (!rows || !rows.length) {
-          rows = await supabaseFetch(buildMemoIlikeQuery(rawId));
-        }
-
-        if (!rows || !rows.length) {
+        const memo = await findMemoRecord(rawId);
+        if (!memo) {
           return res.status(200).json({
             result: "error",
             message: `Document not found: ${rawId}`
           });
         }
 
-        const memo = rows[0];
         const doc = mapMemoToDoc(memo);
 
         // Fetch routing movement history
         let history = [];
         try {
+          const encId = encodeURIComponent(doc.controlRefId);
+          const memoIdEnc = encodeURIComponent(memo.id);
           const moveRows = await supabaseFetch(
-            `document_movements?or=(control_ref_id.eq.${enc},memo_id.eq.${memo.id})&order=date_time.desc&limit=50`
+            `document_movements?or=(control_ref_id.eq.%22${encId}%22,memo_id.eq.${memoIdEnc})&order=date_time.desc&limit=50`
           );
           if (Array.isArray(moveRows)) {
             history = moveRows.map(m => ({
@@ -311,11 +365,8 @@ module.exports = async function handler(req, res) {
               remarks: m.remarks
             }));
           }
-        } catch (_) {
-          // document_movements table might not be created yet, fallback gracefully
-        }
+        } catch (_) {}
 
-        // If no movements logged yet, create an initial entry for routing slip display
         if (!history.length) {
           history.push({
             controlRefId: doc.controlRefId,
@@ -365,24 +416,18 @@ module.exports = async function handler(req, res) {
       }
 
       try {
-        let rows = await supabaseFetch(buildMemoQuery(rawId));
-        if (!rows || !rows.length) {
-          rows = await supabaseFetch(buildMemoIlikeQuery(rawId));
-        }
-
-        if (!rows || !rows.length) {
+        const memo = await findMemoRecord(rawId);
+        if (!memo) {
           return res.status(404).json({
             result: "error",
             message: `Document not found: ${rawId}`
           });
         }
 
-        const memo = rows[0];
         const oldSection = memo.assigned_section || "Message Center";
         const today = new Date().toISOString().split("T")[0];
         const nowIso = new Date().toISOString();
 
-        // Determine workflow_status constraint-compliant values
         let workflowStatus = memo.workflow_status;
         const updatePayload = {
           updated_at: nowIso
@@ -411,13 +456,11 @@ module.exports = async function handler(req, res) {
           });
         }
 
-        // Update memo row in Supabase
         await supabaseFetch(`memos?id=eq.${memo.id}`, {
           method: "PATCH",
           body: updatePayload
         });
 
-        // Insert routing movement history log
         try {
           await supabaseFetch("document_movements", {
             method: "POST",

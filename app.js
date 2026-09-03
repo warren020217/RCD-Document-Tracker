@@ -205,15 +205,18 @@ function renderLatestMemos(data){
 
   let rows=Array.isArray(data.documents)?data.documents:[];
 
-  // Prevent the Latest Memos list from displaying the same document more
-  // than once when the API returns duplicate records for a control reference.
-  // The API result is newest-first, so keep the first occurrence.
+  // Prevent displaying duplicate memos: deduplicate by normalized control ref,
+  // duplicate fingerprint, and subject+date.
   const seenControlRefs=new Set();
+  const seenSubjectDates=new Set();
   rows=rows.filter(d=>{
-    const id=String(d?.controlRefId||"").trim();
+    const id=String(d?.controlRefId||"").trim().toUpperCase();
+    const subjDate=String(d?.subject||"").trim().toLowerCase().replace(/\s+/g," ")+"|"+(d?.dateLogged||"");
     if(!id)return true;
     if(seenControlRefs.has(id))return false;
+    if(subjDate.length > 8 && seenSubjectDates.has(subjDate))return false;
     seenControlRefs.add(id);
+    if(subjDate.length > 8) seenSubjectDates.add(subjDate);
     return true;
   });
 
@@ -247,18 +250,23 @@ function renderLatestMemos(data){
     const type=String(d.memoType||"INCOMING").toUpperCase();
     const typeBadge=`<span class="memoTypeBadge ${type==='OUTGOING'?'memoTypeOutgoing':'memoTypeIncoming'}">${esc(type)}</span>`;
     return `<div class="memoItem ${selected?'memoItemSelected':''}">
-      <div class="memoCheckWrap">
-        <input type="checkbox" class="memoSelect" data-memo-id="${esc(id)}" ${selected?'checked':''} aria-label="Select ${esc(id)}">
-      </div>
-      <div class="memoMain">
-        <div class="memoRef">${typeBadge}${esc(id)}</div>
-        <div class="memoSubject">${esc(d.subject||"Untitled Memo")}</div>
-        <div class="memoMeta">${esc(d.originatingOffice||"")} ${d.dateLogged?`· ${esc(formatMemoDate(d.dateLogged))}`:""}</div>
+      <div class="memoTopSection">
+        <div class="memoCheckWrap">
+          <input type="checkbox" class="memoSelect" data-memo-id="${esc(id)}" ${selected?'checked':''} aria-label="Select ${esc(id)}">
+        </div>
+        <div class="memoMain">
+          <div class="memoHeaderRow">
+            ${typeBadge}
+            <span class="memoRef">${esc(id)}</span>
+          </div>
+          <div class="memoSubject">${esc(d.subject||"Untitled Memo")}</div>
+          <div class="memoMeta">${esc(d.originatingOffice||"")} ${d.dateLogged?`· ${esc(formatMemoDate(d.dateLogged))}`:""}</div>
+        </div>
       </div>
       <div class="memoActions">
         ${selected?"":`<button class="memoForward" type="button" data-memo-id="${esc(id)}" data-memo-action="view">View</button>`}
         <button class="memoForward" type="button" data-memo-id="${esc(id)}" data-memo-action="forward">Forward</button>
-        <button class="memoForward" type="button" data-memo-id="${esc(id)}" data-memo-action="print">Print Routing Slip</button>
+        <button class="memoForward" type="button" data-memo-id="${esc(id)}" data-memo-action="print">Print Slip</button>
       </div>
     </div>`;
   }).join("") : '<p class="muted">No memos found.</p>';
@@ -325,8 +333,20 @@ function injectLatestMemoStyles(){
     .memoScrollList::-webkit-scrollbar-thumb{background:#94a3b8;border-radius:8px;border:2px solid #f1f5f9}
     .memoScrollList{scrollbar-width:auto}
     .memoSelectAllRow input,.memoSelect{width:17px;height:17px;accent-color:#173b67;cursor:pointer}
-    .memoItem{display:flex;align-items:center;gap:10px}
-    .memoCheckWrap{flex:0 0 24px;display:flex;align-items:center;justify-content:center}
+    .memoItem{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border-top:1px solid #e2e8f0;background:#fff;transition:background .15s}
+    .memoTopSection{display:flex;align-items:flex-start;gap:12px;flex:1 1 auto;min-width:0}
+    .memoCheckWrap{flex:0 0 24px;display:flex;align-items:center;justify-content:center;padding-top:2px}
+    .memoMain{flex:1 1 auto;min-width:0}
+    .memoHeaderRow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+    .memoTypeBadge{display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;letter-spacing:.4px;padding:2px 8px;border-radius:5px;min-width:68px;text-align:center;text-transform:uppercase;line-height:1.5}
+    .memoTypeIncoming{background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd}
+    .memoTypeOutgoing{background:#fef3c7;color:#b45309;border:1px solid #fde68a}
+    .memoRef{font-weight:800;color:#17365d;font-size:14px;letter-spacing:.15px}
+    .memoSubject{font-weight:700;color:#0f172a;font-size:13.5px;line-height:1.35;margin-top:5px;word-break:break-word}
+    .memoMeta{font-size:12px;color:#64748b;margin-top:4px}
+    .memoActions{flex:0 0 auto;display:flex;align-items:center;gap:6px}
+    .memoForward{appearance:none;border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:#173b67;font:600 12.5px Arial,sans-serif;padding:7px 12px;cursor:pointer;white-space:nowrap;transition:all .15s}
+    .memoForward:hover{background:#f1f5f9;border-color:#94a3b8}
     .memoItemSelected{background:#f4f8fc}
     .memoItemSelected .memoSubject{color:#173b67}
     .memoPagination{display:flex;align-items:center;justify-content:center;gap:14px;padding:16px 0 2px;border-top:1px solid #e2e8f0;margin-top:4px}
@@ -334,14 +354,10 @@ function injectLatestMemoStyles(){
     .memoPageBtn:hover:not(:disabled){background:#f4f8fc}
     .memoPageBtn:disabled{color:#94a3b8;background:#f8fafc;cursor:not-allowed;opacity:.8}
     .memoPageInfo{font-size:12px;color:#64748b;text-align:center}
-    .memoTypeBadge{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.4px;padding:2px 7px;border-radius:5px;margin-right:7px;vertical-align:middle;text-transform:uppercase}
-    .memoTypeIncoming{background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd}
-    .memoTypeOutgoing{background:#fef3c7;color:#b45309;border:1px solid #fde68a}
-    @media(max-width:650px){
-      .memoItem{align-items:flex-start;flex-wrap:wrap}
-      .memoCheckWrap{padding-top:3px}
-      .memoMain{flex:1 1 calc(100% - 40px)}
-      .memoActions{width:100%;margin-left:34px;justify-content:flex-start}
+    @media(max-width:768px){
+      .memoItem{flex-direction:column;align-items:stretch;gap:10px;padding:12px 6px}
+      .memoActions{display:grid;grid-template-columns:1fr 1fr 1.2fr;gap:6px;width:100%;padding-left:36px}
+      .memoForward{width:100%;text-align:center;padding:8px 4px;font-size:11.5px}
     }
   `;
   document.head.appendChild(style);
