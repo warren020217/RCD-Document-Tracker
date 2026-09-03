@@ -279,14 +279,23 @@ module.exports = async function handler(req, res) {
     // 2. GET LATEST MEMOS (INCOMING & OUTGOING, DEDUPLICATED STRICTLY)
     if (action === "getDocuments") {
       res.setHeader("Cache-Control", "public, s-maxage=5, stale-while-revalidate=30");
-      const limit = Math.min(Math.max(Number(params.limit) || 100, 1), 5000);
+      const limit = Math.min(Math.max(Number(params.limit) || 5000, 1), 5000);
       const offset = Math.max(Number(params.offset) || 0, 0);
 
       try {
+        const all = [];
+        const pageSize = 1000;
         const fetchLimit = Math.min(limit * 2, 5000);
-        const endpoint = `memos?select=*&is_deleted=eq.false&order=date_logged.desc.nullslast,time_logged.desc.nullslast,created_at.desc.nullslast&limit=${fetchLimit}&offset=${offset}`;
-        const memos = await supabaseFetch(endpoint);
-        const list = Array.isArray(memos) ? memos : [];
+
+        for (let from = offset; all.length < fetchLimit; from += pageSize) {
+          const fetchSize = Math.min(pageSize, fetchLimit - all.length);
+          const endpoint = `memos?select=*&is_deleted=eq.false&order=date_logged.desc.nullslast,time_logged.desc.nullslast,created_at.desc.nullslast&limit=${fetchSize}&offset=${from}`;
+          const rows = await supabaseFetch(endpoint);
+          if (Array.isArray(rows) && rows.length) {
+            all.push(...rows);
+          }
+          if (!rows || rows.length < fetchSize) break;
+        }
 
         // Deduplicate strictly: no duplicate memo numbers or duplicate subjects on same date
         const seenMemoNos = new Set();
@@ -294,18 +303,18 @@ module.exports = async function handler(req, res) {
         const seenSubjectDate = new Set();
         const uniqueDocs = [];
 
-        for (const m of list) {
+        for (const m of all) {
           const memoNo = String(m.memo_no || m.legacy_id || m.id || "").trim().toUpperCase();
           const fp = String(m.duplicate_fingerprint || "").trim();
-          const subjDate = `${String(m.subject || "").trim().toLowerCase()}|${m.date_logged || ""}`;
+          const subjDate = `${String(m.subject || "").trim().toLowerCase().replace(/\s+/g, " ")}|${m.date_logged || ""}`;
 
           if (memoNo && seenMemoNos.has(memoNo)) continue;
           if (fp && seenFingerprints.has(fp)) continue;
-          if (subjDate.length > 5 && seenSubjectDate.has(subjDate)) continue;
+          if (subjDate.length > 8 && seenSubjectDate.has(subjDate)) continue;
 
           if (memoNo) seenMemoNos.add(memoNo);
           if (fp) seenFingerprints.add(fp);
-          if (subjDate.length > 5) seenSubjectDate.add(subjDate);
+          if (subjDate.length > 8) seenSubjectDate.add(subjDate);
 
           uniqueDocs.push(mapMemoToDoc(m, offset + uniqueDocs.length));
           if (uniqueDocs.length >= limit) break;

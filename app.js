@@ -333,7 +333,7 @@ function injectLatestMemoStyles(){
     .memoScrollList::-webkit-scrollbar-thumb{background:#94a3b8;border-radius:8px;border:2px solid #f1f5f9}
     .memoScrollList{scrollbar-width:auto}
     .memoSelectAllRow input,.memoSelect{width:17px;height:17px;accent-color:#173b67;cursor:pointer}
-    .memoItem{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border-top:1px solid #e2e8f0;background:#fff;transition:background .15s}
+    .memoItem{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border-top:1px solid #e2e8f0;background:#fff;transition:background .15s;content-visibility:auto;contain-intrinsic-size:80px}
     .memoTopSection{display:flex;align-items:flex-start;gap:12px;flex:1 1 auto;min-width:0}
     .memoCheckWrap{flex:0 0 24px;display:flex;align-items:center;justify-content:center;padding-top:2px}
     .memoMain{flex:1 1 auto;min-width:0}
@@ -382,6 +382,13 @@ function printRoutingSlipTime(value){
   if(value===undefined||value===null||value==="") return "";
   const d=new Date(value);
   if(!Number.isNaN(d.getTime())) return d.toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"});
+  return String(value);
+}
+
+function formatRoutingDate(value){
+  if(value===undefined||value===null||value==="") return "";
+  const d=new Date(value);
+  if(!Number.isNaN(d.getTime())) return d.toLocaleDateString("en-PH",{month:"short",day:"numeric",year:"numeric"});
   return String(value);
 }
 
@@ -927,9 +934,9 @@ async function openMemoModal(id,mode="view"){
 async function loadAllMemos(options={}){
   const target=$("latestMemos");
   if(!target)return;
-  target.innerHTML='<div class="box loading">Loading latest memos...</div>';
+  target.innerHTML='<div class="box loading">Loading all memos...</div>';
   try{
-    const limit = Number(options.limit) || 100;
+    const limit = Number(options.limit) || 5000;
     const d=await apiAction("getDocuments",{
       limit: limit,
       offset: 0,
