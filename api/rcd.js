@@ -59,6 +59,28 @@ const PERSONNEL = [
   ["Pat Darwin T Solis", "Message Center", "YES"]
 ];
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isUuid(str) {
+  return UUID_REGEX.test(String(str || "").trim());
+}
+
+function buildMemoQuery(rawId) {
+  const enc = encodeURIComponent(String(rawId || "").trim());
+  if (isUuid(rawId)) {
+    return `memos?or=(id.eq.${enc},memo_no.eq.${enc},legacy_id.eq.${enc})&limit=1`;
+  }
+  return `memos?or=(memo_no.eq.${enc},legacy_id.eq.${enc})&limit=1`;
+}
+
+function buildMemoIlikeQuery(rawId) {
+  const enc = encodeURIComponent(String(rawId || "").trim());
+  return `memos?or=(memo_no.ilike.${enc},legacy_id.ilike.${enc})&limit=1`;
+}
+
+let metricsCache = null;
+let metricsCacheTime = 0;
+const METRICS_TTL = 15000; // 15s in-memory cache
+
 async function supabaseFetch(endpoint, options = {}) {
   const url = `${SUPABASE_URL}/rest/v1/${endpoint.replace(/^\/+/, "")}`;
   const headers = Object.assign(
@@ -159,6 +181,16 @@ module.exports = async function handler(req, res) {
 
     // 1. DASHBOARD METRICS
     if (action === "dashboard") {
+      res.setHeader("Cache-Control", "public, s-maxage=10, stale-while-revalidate=59");
+
+      // Serve from memory cache if fresh
+      if (metricsCache && (Date.now() - metricsCacheTime < METRICS_TTL)) {
+        return res.status(200).json({
+          result: "success",
+          metrics: metricsCache
+        });
+      }
+
       try {
         const rows = await supabaseFetch(
           "memos?select=id,workflow_status,assigned_section&is_deleted=eq.false"
@@ -186,14 +218,17 @@ module.exports = async function handler(req, res) {
           }
         });
 
+        metricsCache = {
+          total,
+          messageCenter,
+          forwarded,
+          completed
+        };
+        metricsCacheTime = Date.now();
+
         return res.status(200).json({
           result: "success",
-          metrics: {
-            total,
-            messageCenter,
-            forwarded,
-            completed
-          }
+          metrics: metricsCache
         });
       } catch (dbErr) {
         return res.status(200).json({
@@ -205,6 +240,7 @@ module.exports = async function handler(req, res) {
 
     // 2. GET ALL / LATEST MEMOS (INCOMING & OUTGOING)
     if (action === "getDocuments") {
+      res.setHeader("Cache-Control", "public, s-maxage=5, stale-while-revalidate=30");
       const limit = Math.min(Math.max(Number(params.limit) || 100, 1), 5000);
       const offset = Math.max(Number(params.offset) || 0, 0);
 
@@ -240,17 +276,12 @@ module.exports = async function handler(req, res) {
       }
 
       try {
-        const enc = encodeURIComponent(rawId);
-        // Look up by exact memo_no, legacy_id, or UUID id
-        let rows = await supabaseFetch(
-          `memos?or=(memo_no.eq.${enc},legacy_id.eq.${enc},id.eq.${enc})&limit=1`
-        );
+        // Query safely without throwing uuid syntax errors on non-uuid strings
+        let rows = await supabaseFetch(buildMemoQuery(rawId));
 
         // Fallback: Case-insensitive search
         if (!rows || !rows.length) {
-          rows = await supabaseFetch(
-            `memos?or=(memo_no.ilike.${enc},legacy_id.ilike.${enc})&limit=1`
-          );
+          rows = await supabaseFetch(buildMemoIlikeQuery(rawId));
         }
 
         if (!rows || !rows.length) {
@@ -334,14 +365,9 @@ module.exports = async function handler(req, res) {
       }
 
       try {
-        const enc = encodeURIComponent(rawId);
-        let rows = await supabaseFetch(
-          `memos?or=(memo_no.eq.${enc},legacy_id.eq.${enc},id.eq.${enc})&limit=1`
-        );
+        let rows = await supabaseFetch(buildMemoQuery(rawId));
         if (!rows || !rows.length) {
-          rows = await supabaseFetch(
-            `memos?or=(memo_no.ilike.${enc},legacy_id.ilike.${enc})&limit=1`
-          );
+          rows = await supabaseFetch(buildMemoIlikeQuery(rawId));
         }
 
         if (!rows || !rows.length) {
@@ -409,6 +435,8 @@ module.exports = async function handler(req, res) {
         } catch (logErr) {
           console.warn("Movement log insert skipped:", logErr.message);
         }
+
+        metricsCache = null;
 
         return res.status(200).json({
           result: "success",

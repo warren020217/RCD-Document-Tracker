@@ -513,7 +513,7 @@ async function fetchDocumentsByIds(ids){
     const cached=memoDataById.get(id);
     try{
       const data=await api({action:"getDocument",id});
-      if(data&&!data.result){
+      if(data && data.result !== "error"){
         const d=data.document||data;
         memoDataById.set(id,d);
         docs.push(d);
@@ -911,12 +911,13 @@ async function openMemoModal(id,mode="view"){
 async function loadAllMemos(options={}){
   const target=$("latestMemos");
   if(!target)return;
-  target.innerHTML='<div class="box loading">Loading all memos...</div>';
+  target.innerHTML='<div class="box loading">Loading latest memos...</div>';
   try{
+    const limit = Number(options.limit) || 100;
     const d=await apiAction("getDocuments",{
-      limit:5000,
-      offset:0,
-      sync:options.sync===true ? "true" : "false"
+      limit: limit,
+      offset: 0,
+      sync: options.sync===true ? "true" : "false"
     });
     renderLatestMemos(d);
   }catch(e){
@@ -929,6 +930,23 @@ async function latestMemos(){
 }
 
 async function dashboard(){
+  // 1. Instantly show cached metrics on mobile if available
+  try {
+    const cached = localStorage.getItem("RCD_METRICS_CACHE");
+    if (cached) {
+      const m = JSON.parse(cached);
+      if (m && typeof m.total !== "undefined") {
+        $("total").textContent = Number(m.total ?? 0).toLocaleString();
+        $("message").textContent = Number(m.messageCenter ?? 0).toLocaleString();
+        $("forwarded").textContent = Number(m.forwarded ?? 0).toLocaleString();
+        $("completed").textContent = Number(m.completed ?? 0).toLocaleString();
+        $("connectionStatus").textContent = "Connected to Supabase RCD Routing Database";
+        $("connectionStatus").className = "connection ok";
+      }
+    }
+  } catch (_) {}
+
+  // 2. Fetch fresh live metrics from Supabase
   try{
     const d=await apiAction("dashboard");
     const m=d.metrics||{};
@@ -938,13 +956,14 @@ async function dashboard(){
     $("completed").textContent=Number(m.completed??0).toLocaleString();
     $("connectionStatus").textContent="Connected to Supabase RCD Routing Database";
     $("connectionStatus").className="connection ok";
+    try {
+      localStorage.setItem("RCD_METRICS_CACHE", JSON.stringify(m));
+    } catch (_) {}
   }catch(e){
-    $("total").textContent="-";
-    $("message").textContent="-";
-    $("forwarded").textContent="-";
-    $("completed").textContent="-";
-    $("connectionStatus").textContent="Supabase API unavailable: "+e.message;
-    $("connectionStatus").className="connection errorConn";
+    if ($("total").textContent === "-") {
+      $("connectionStatus").textContent="Supabase API unavailable: "+e.message;
+      $("connectionStatus").className="connection errorConn";
+    }
     console.error("Dashboard API error:",e);
   }
 }
@@ -960,19 +979,24 @@ document.addEventListener("click",e=>{
   if(e.target.id==="complete")move("COMPLETE");
 });
 
-window.addEventListener("load",()=>{
+function startApp(){
   const id=new URLSearchParams(location.search).get("id");
   if(id){
     page("track");
     $("trackId").value=id;
-    // QR-linked document views also expose the routing actions.
     find(id,$("result"),true);
   } else {
     dashboard();
     latestMemos();
   }
   $("refreshMemos")?.addEventListener("click",latestMemos);
-});
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", startApp);
+} else {
+  startApp();
+}
 
 document.addEventListener("keydown",e=>{
   if(e.key==="Escape"){
