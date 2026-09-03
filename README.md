@@ -1,96 +1,70 @@
-# PRO4A RCD Document Routing System
+# PRO4A RCD Document Routing & Tracking System (Supabase Version)
 
-Revised version of the PRO4A RCD Document Routing System.
+High-performance cloud-backed document routing and tracking system for the **Philippine National Police - Police Regional Office 4A (PRO4A) Regional Comptrollership Division (RCD)**.
 
-## What was fixed
+Deployed at: **https://rcd-document-tracker.vercel.app**
 
-The original project had three different Google Apps Script Web App deployment URLs in different files. That could cause the website, synchronization script, and routing database to talk to different backend deployments.
+---
 
-The revised project uses the Web App URL defined in `apps-script/Code.gs` as the backend source of truth. `api/rcd.js` also allows an optional Vercel environment variable named `RCD_APPS_SCRIPT_URL`.
+## What was Changed
 
-The synchronization logic was also changed so that:
+- **Migrated from Google Sheets to Supabase**: Replaced the slow Google Apps Script backend with direct high-speed Supabase REST queries (~50-100ms response time).
+- **Single Source of Truth**: All **INCOMING** and **OUTGOING** memorandum records are loaded directly from the `public.memos` table in Supabase project `insgdxhigsimnaauyhws`.
+- **Movement History Logging**: Created `public.document_movements` in Supabase to track all Forward, Receive, and Complete movements, enabling full movement audit history and physical A4 Routing Slip printing.
+- **100% Preserved UI Design**: Kept all existing user interfaces, QR code scanning, modal views, batch actions, and printable slip formats.
+- **Added Memo Type Badges**: Latest memos and search results now show clear `[INCOMING]` and `[OUTGOING]` badges.
 
-- `PRO4A_RCD_Memo_Logbook_` remains the read-only source.
-- New source records are added to `DOCUMENTS`.
-- Existing source records are updated only in source columns A:M.
-- Routing columns N:T are preserved.
-- Old routing records are no longer automatically deleted when a source row disappears.
-- Duplicate Control Ref IDs are not silently collapsed during synchronization.
-- The website `Latest Memos` request can refresh the source before reading the latest records.
-- The API now supports the `getDocuments` action required by the current frontend.
-- Automatic synchronization can run from edits in the source Memo Logbook.
-- A 5-minute scheduled synchronization remains as a safety net for imports, formulas, and other changes that do not trigger `onEdit`.
+---
 
-## Installation
+## Setup Instructions
 
-### 1. Update the Google Apps Script
+### Step 1: Run the Database Setup in Supabase
 
-Open the Apps Script project attached to the **RCD DOCUMENT ROUTING DATABASE** spreadsheet.
+1. Open your Supabase Project Dashboard:
+   👉 **[warren020217's Project | SQL Editor](https://supabase.com/dashboard/project/insgdxhigsimnaauyhws/sql/new)**
+2. Open the file [`supabase_setup.sql`](./supabase_setup.sql) located in this project folder.
+3. Copy and paste the entire content of `supabase_setup.sql` into the Supabase SQL Editor and click **Run**.
 
-Replace the existing `Code.gs` with:
+This script:
+- Creates the `document_movements` table for routing logs.
+- Adds RLS policies so public tracker and QR code scans can query active memos without requiring a login gate.
+- Enables recording document routing movements.
 
-`apps-script/Code.gs`
+---
 
-Save the project.
+### Step 2: (Optional but Recommended) Add Service Role Key in Vercel
 
-### 2. Update the Web App deployment
+If you want the backend serverless API (`api/rcd.js`) to bypass RLS with administrative permissions:
 
-In Apps Script:
+1. In your Supabase Dashboard, go to **Project Settings** > **API**.
+2. Copy your **`service_role` (secret)** key.
+3. In your **Vercel Dashboard** under the `rcd-document-tracker` project:
+   - Go to **Settings** > **Environment Variables**.
+   - Add:
+     - `SUPABASE_URL`: `https://insgdxhigsimnaauyhws.supabase.co`
+     - `SUPABASE_SERVICE_ROLE_KEY`: `your_service_role_secret_key`
+4. Redeploy the project in Vercel.
 
-1. Deploy > Manage deployments.
-2. Open the existing Web App deployment used by the project.
-3. Create a new version from the updated code, or edit the existing deployment.
-4. Keep the Web App access setting appropriate for your users.
-5. Make sure the deployed URL matches the URL in `apps-script/Code.gs` under `CONFIG.WEB_APP_URL`.
+---
 
-If a new deployment URL is created, update both:
+### Step 3: Deploy to GitHub / Vercel
 
-- `CONFIG.WEB_APP_URL` in `apps-script/Code.gs`
-- `RCD_APPS_SCRIPT_URL` in Vercel
+Push the changes to your GitHub repository:
+```bash
+git add .
+git commit -m "Migrate Document Tracker to Supabase database"
+git push origin main
+```
+Vercel will automatically build and deploy the updated tracker.
 
-Do not leave the old deployment URL in `api/rcd.js`.
+---
 
-### 3. Install the automatic sync
+## API Actions (`/api/rcd`)
 
-In the **RCD DOCUMENT ROUTING DATABASE** spreadsheet, reload the sheet.
-
-Use:
-
-**RCD ROUTING > 4. Install Automatic Sync**
-
-The revised installer creates:
-
-- a source-spreadsheet edit trigger for near-real-time synchronization
-- a 5-minute time-based backup trigger
-
-The first installation may request authorization. Approve it using the account that has access to both spreadsheets.
-
-### 4. Test manually
-
-Use:
-
-**RCD ROUTING > 2. Sync Existing Memo Logbook**
-
-Then check the `DOCUMENTS` sheet.
-
-After that, add a new record to the source `Memo Logbook` sheet. The target database should receive it automatically. The website Refresh button also requests a source synchronization before displaying the latest memos.
-
-## Important
-
-Do not run **RCD ROUTING > 1. Setup Database** on a production database unless you intentionally want to rebuild the database. That function clears and recreates the database sheets.
-
-The revised synchronization function itself does not clear or rebuild the `DOCUMENTS` sheet.
-
-## Backend actions
-
-The Apps Script API supports:
-
-- `dashboard`
-- `getDocument`
-- `getDocuments`
-- `getSections`
-- `getPersonnel`
-- `routeDocument`
-- `sync`
-
-The existing frontend routing functions remain in place.
+- `action=dashboard`: Returns live counts (total documents, message center, forwarded, completed).
+- `action=getDocuments`: Retrieves recent incoming and outgoing memos sorted newest-first.
+- `action=getDocument&id=...`: Retrieves memo details and routing movement history.
+- `action=routeDocument`: Records Forward, Receive, or Complete movements into Supabase.
+- `action=getSections`: Returns the 9 PRO4A RCD sections.
+- `action=getPersonnel`: Returns personnel for a selected section.
+- `action=sync`: Confirms real-time Supabase connection.

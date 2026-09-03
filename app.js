@@ -84,8 +84,11 @@ function showDoc(data,target,actions=false){
   current=d;
   let hist=(d.history||[]).map(x=>`<div class="move"><b>${esc(x.action)}</b><br>${esc(x.fromSection||"Initial")} → ${esc(x.toSection||"")}<small>${esc(x.personnel||"")} · ${esc(x.dateTime||"")}</small>${x.remarks?`<small>${esc(x.remarks)}</small>`:""}`).join("")||'<p class="muted">No movement history.</p>';
 
+  const type=String(d.memoType||"INCOMING").toUpperCase();
+  const typeBadge=`<span class="memoTypeBadge ${type==='OUTGOING'?'memoTypeOutgoing':'memoTypeIncoming'}">${esc(type)}</span>`;
+
   target.innerHTML=`<div class="doc">
-    <div class="docHead"><div class="docId">${esc(d.controlRefId)}</div><span class="status">${esc(d.routingStatus||d.locationStatus||"Unassigned")}</span></div>
+    <div class="docHead"><div class="docId">${typeBadge}${esc(d.controlRefId)}</div><span class="status">${esc(d.routingStatus||d.locationStatus||"Unassigned")}</span></div>
     <div class="fields">
       <div class="field"><label>Current Section</label><b>${esc(d.currentSection||"Not assigned")}</b></div>
       <div class="field"><label>Current Personnel</label><b>${esc(d.currentPersonnel||"Not assigned")}</b></div>
@@ -241,12 +244,14 @@ function renderLatestMemos(data){
   const listHtml=rows.length ? rows.map(d=>{
     const id=String(d.controlRefId||"").trim();
     const selected=selectedMemoIds.has(id);
+    const type=String(d.memoType||"INCOMING").toUpperCase();
+    const typeBadge=`<span class="memoTypeBadge ${type==='OUTGOING'?'memoTypeOutgoing':'memoTypeIncoming'}">${esc(type)}</span>`;
     return `<div class="memoItem ${selected?'memoItemSelected':''}">
       <div class="memoCheckWrap">
         <input type="checkbox" class="memoSelect" data-memo-id="${esc(id)}" ${selected?'checked':''} aria-label="Select ${esc(id)}">
       </div>
       <div class="memoMain">
-        <div class="memoRef">${esc(id)}</div>
+        <div class="memoRef">${typeBadge}${esc(id)}</div>
         <div class="memoSubject">${esc(d.subject||"Untitled Memo")}</div>
         <div class="memoMeta">${esc(d.originatingOffice||"")} ${d.dateLogged?`· ${esc(formatMemoDate(d.dateLogged))}`:""}</div>
       </div>
@@ -329,6 +334,9 @@ function injectLatestMemoStyles(){
     .memoPageBtn:hover:not(:disabled){background:#f4f8fc}
     .memoPageBtn:disabled{color:#94a3b8;background:#f8fafc;cursor:not-allowed;opacity:.8}
     .memoPageInfo{font-size:12px;color:#64748b;text-align:center}
+    .memoTypeBadge{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.4px;padding:2px 7px;border-radius:5px;margin-right:7px;vertical-align:middle;text-transform:uppercase}
+    .memoTypeIncoming{background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd}
+    .memoTypeOutgoing{background:#fef3c7;color:#b45309;border:1px solid #fde68a}
     @media(max-width:650px){
       .memoItem{align-items:flex-start;flex-wrap:wrap}
       .memoCheckWrap{padding-top:3px}
@@ -755,6 +763,8 @@ function injectMemoModalStyles(){
 function memoPopupFields(d){
   return `
     <div class="memoPopupFields">
+      <div class="memoPopupField"><label>Memo Type</label><b>${esc(d.memoType||"INCOMING")}</b></div>
+      <div class="memoPopupField"><label>Status</label><b>${esc(d.routingStatus||d.locationStatus||"Unassigned")}</b></div>
       <div class="memoPopupField"><label>Current Section</label><b>${esc(d.currentSection||"Not assigned")}</b></div>
       <div class="memoPopupField"><label>Current Personnel</label><b>${esc(d.currentPersonnel||"Not assigned")}</b></div>
       <div class="memoPopupField"><label>Originating Office</label><b>${esc(d.originatingOffice||"")}</b></div>
@@ -763,7 +773,6 @@ function memoPopupFields(d){
       <div class="memoPopupField"><label>Date Logged</label><b>${esc(d.dateLogged||"")}</b></div>
       <div class="memoPopupField"><label>Action Required</label><b>${esc(d.actionRequired||"")}</b></div>
       <div class="memoPopupField"><label>Date Received</label><b>${esc(d.dateReceived||"")}</b></div>
-      <div class="memoPopupField"><label>Status</label><b>${esc(d.routingStatus||d.locationStatus||"Unassigned")}</b></div>
     </div>`;
 }
 
@@ -927,14 +936,14 @@ async function dashboard(){
     $("message").textContent=Number(m.messageCenter??0).toLocaleString();
     $("forwarded").textContent=Number(m.forwarded??0).toLocaleString();
     $("completed").textContent=Number(m.completed??0).toLocaleString();
-    $("connectionStatus").textContent="Connected to RCD routing database";
+    $("connectionStatus").textContent="Connected to Supabase RCD Routing Database";
     $("connectionStatus").className="connection ok";
   }catch(e){
     $("total").textContent="-";
     $("message").textContent="-";
     $("forwarded").textContent="-";
     $("completed").textContent="-";
-    $("connectionStatus").textContent="RCD API unavailable: "+e.message;
+    $("connectionStatus").textContent="Supabase API unavailable: "+e.message;
     $("connectionStatus").className="connection errorConn";
     console.error("Dashboard API error:",e);
   }
