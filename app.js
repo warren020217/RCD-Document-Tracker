@@ -95,7 +95,7 @@ function showDoc(data,target,actions=false){
       <div class="field"><label>Originating Office</label><b>${esc(d.originatingOffice)}</b></div>
       <div class="field"><label>Received By</label><b>${esc(d.receivedBy)}</b></div>
       <div class="field wide"><label>Subject</label><b>${esc(d.subject)}</b></div>
-      <div class="field"><label>Date Logged</label><b>${esc(d.dateLogged)}</b></div>
+      <div class="field"><label>Date Logged</label><b>${esc(d.dateLogged)}${d.time?` · ${esc(printRoutingSlipTime(d.time))}`:""}</b></div>
       <div class="field"><label>Action Required</label><b>${esc(d.actionRequired)}</b></div>
       <div class="field"><label>Date Received</label><b>${esc(d.dateReceived)}</b></div>
     </div>
@@ -373,23 +373,84 @@ function getReceivedRecord(d){
 
 function printRoutingSlipDate(value){
   if(value===undefined||value===null||value==="") return "";
-  const d=new Date(value);
+  const str = String(value).trim();
+  const match = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(match){
+    const year = parseInt(match[1], 10);
+    const month = parseInt(match[2], 10) - 1;
+    const day = parseInt(match[3], 10);
+    const d = new Date(year, month, day);
+    return d.toLocaleDateString("en-PH",{year:"numeric",month:"long",day:"numeric"});
+  }
+  const d = new Date(str);
   if(!Number.isNaN(d.getTime())) return d.toLocaleDateString("en-PH",{year:"numeric",month:"long",day:"numeric"});
-  return String(value);
+  return str;
 }
 
-function printRoutingSlipTime(value){
-  if(value===undefined||value===null||value==="") return "";
-  const d=new Date(value);
-  if(!Number.isNaN(d.getTime())) return d.toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"});
-  return String(value);
+function printRoutingSlipTime(timeValue, dateValue, fallbackIso){
+  let val = String(timeValue || "").trim();
+
+  // If timeValue is empty, check if dateValue or fallback has time
+  if (!val && dateValue && /[T\s]\d{1,2}:\d{2}/.test(String(dateValue))) {
+    val = String(dateValue).trim();
+  }
+  if (!val && fallbackIso && /[T\s]\d{1,2}:\d{2}/.test(String(fallbackIso))) {
+    val = String(fallbackIso).trim();
+  }
+  if (!val) return "";
+
+  // 1. Check for 12-hour format: '3:57 PM', '03:57:58 PM', '3:57pm'
+  const ampmMatch = val.match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)$/i);
+  if (ampmMatch) {
+    let h = parseInt(ampmMatch[1], 10);
+    const m = ampmMatch[2];
+    const ampm = ampmMatch[3].toUpperCase();
+    return `${h}:${m} ${ampm}`;
+  }
+
+  // 2. Check for 24-hour format: '15:57:58', '15:57', '08:00:00', '07:54'
+  const time24Match = val.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (time24Match) {
+    let h = parseInt(time24Match[1], 10);
+    const m = time24Match[2];
+    const ampm = h >= 12 ? "PM" : "AM";
+    h = h % 12 || 12;
+    return `${h}:${m} ${ampm}`;
+  }
+
+  // 3. If it's a date-only string like '2026-09-09', it has NO time component!
+  // Do NOT parse it as UTC midnight which results in 8:00 AM in GMT+8.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(val)) {
+    if (fallbackIso && /[T\s]\d{1,2}:\d{2}/.test(String(fallbackIso))) {
+      const d = new Date(fallbackIso);
+      if (!Number.isNaN(d.getTime())) return d.toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" });
+    }
+    return "";
+  }
+
+  // 4. Try parsing as full date/time string or ISO string
+  const d = new Date(val);
+  if (!Number.isNaN(d.getTime())) {
+    return d.toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" });
+  }
+
+  return val;
 }
 
 function formatRoutingDate(value){
   if(value===undefined||value===null||value==="") return "";
-  const d=new Date(value);
+  const str = String(value).trim();
+  const match = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(match){
+    const year = parseInt(match[1], 10);
+    const month = parseInt(match[2], 10) - 1;
+    const day = parseInt(match[3], 10);
+    const d = new Date(year, month, day);
+    return d.toLocaleDateString("en-PH",{month:"short",day:"numeric",year:"numeric"});
+  }
+  const d=new Date(str);
   if(!Number.isNaN(d.getTime())) return d.toLocaleDateString("en-PH",{month:"short",day:"numeric",year:"numeric"});
-  return String(value);
+  return str;
 }
 
 function routingSlipRows(d){
@@ -430,8 +491,10 @@ function routingSlipRows(d){
 
 function buildSingleRoutingSlipHtml(d){
   const received=getReceivedRecord(d);
-  const receivedAt=received?.dateTime||d?.dateReceived||d?.dateLogged||"";
-  const preparedBy=received?.personnel||received?.receivedBy||d?.receivedBy||d?.currentPersonnel||"";
+  const memoDate=d?.dateReceived||d?.dateLogged||(received?.dateTime ? String(received.dateTime).split("T")[0] : "")||d?.createdAt||"";
+  const memoTime=d?.time||d?.timeLogged||d?.time_logged||"";
+  const fallbackIso=received?.dateTime||d?.createdAt||d?.created_at||d?.lastUpdated||"";
+  const preparedBy=d?.receivedBy||received?.personnel||received?.receivedBy||d?.currentPersonnel||"";
   const rows=routingSlipRows(d);
   const rowHtml=rows.map(r=>`<tr>
     <td class="nr">${esc(r.nr)}</td>
@@ -451,8 +514,8 @@ function buildSingleRoutingSlipHtml(d){
       </div>
       <div class="metaRight">
         <div class="metaInfo">
-          <div class="metaCell"><span class="metaLabel">Date:</span><span class="metaValue">${esc(printRoutingSlipDate(receivedAt))}</span></div>
-          <div class="metaCell"><span class="metaLabel">Time In:</span><span class="metaValue">${esc(printRoutingSlipTime(receivedAt))}</span></div>
+          <div class="metaCell"><span class="metaLabel">Date:</span><span class="metaValue">${esc(printRoutingSlipDate(memoDate))}</span></div>
+          <div class="metaCell"><span class="metaLabel">Time In:</span><span class="metaValue">${esc(printRoutingSlipTime(memoTime, memoDate, fallbackIso))}</span></div>
           <div class="metaCell"><span class="metaLabel">Prepared by:</span><span class="metaValue">${esc(preparedBy)}</span></div>
         </div>
         <div class="slipQr"><img src="${esc(`https://quickchart.io/qr?text=${encodeURIComponent(`${(window.RCD_CONFIG||{}).APP_URL||location.origin}?id=${encodeURIComponent(String(d?.controlRefId||''))}`)}&size=180`)}" alt="QR code for ${esc(d?.controlRefId||'document')}"></div>
@@ -793,7 +856,7 @@ function memoPopupFields(d){
       <div class="memoPopupField"><label>Originating Office</label><b>${esc(d.originatingOffice||"")}</b></div>
       <div class="memoPopupField"><label>Received By</label><b>${esc(d.receivedBy||"")}</b></div>
       <div class="memoPopupField wide"><label>Subject / Title</label><b>${esc(d.subject||"Untitled Memo")}</b></div>
-      <div class="memoPopupField"><label>Date Logged</label><b>${esc(d.dateLogged||"")}</b></div>
+      <div class="memoPopupField"><label>Date Logged</label><b>${esc(d.dateLogged||"")}${d.time?` · ${esc(printRoutingSlipTime(d.time))}`:""}</b></div>
       <div class="memoPopupField"><label>Action Required</label><b>${esc(d.actionRequired||"")}</b></div>
       <div class="memoPopupField"><label>Date Received</label><b>${esc(d.dateReceived||"")}</b></div>
     </div>`;
