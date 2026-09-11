@@ -1,10 +1,22 @@
 let API_URL=(window.RCD_CONFIG||{}).API_URL||localStorage.getItem("RCD_API_URL")||"/api/rcd";
 let current=null,scanner=null,jsonpCounter=0;
+let cachedAllMemos=[];
+let currentSearchQuery="";
 const selectedMemoIds=new Set();
 const memoDataById=new Map();
 
 const $=id=>document.getElementById(id);
 const esc=v=>String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");
+
+function highlightText(text, query){
+  if(!text || !query) return esc(text);
+  const terms = String(query).trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if(!terms.length) return esc(text);
+  const safeText = esc(text);
+  const escaped = terms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const regex = new RegExp(`(${escaped.join("|")})`, "gi");
+  return safeText.replace(regex, '<mark class="memoHighlight">$1</mark>');
+}
 
 function api(params={}, timeoutMs=20000) {
   return new Promise(async (resolve, reject) => {
@@ -193,7 +205,7 @@ function formatMemoDate(value){
   return String(value);
 }
 
-function renderLatestMemos(data){
+function renderLatestMemos(data, query = currentSearchQuery){
   injectLatestMemoStyles();
   const target=$("latestMemos");
   if(!target)return;
@@ -257,10 +269,10 @@ function renderLatestMemos(data){
         <div class="memoMain">
           <div class="memoHeaderRow">
             ${typeBadge}
-            <span class="memoRef">${esc(id)}</span>
+            <span class="memoRef">${highlightText(id, query)}</span>
           </div>
-          <div class="memoSubject">${esc(d.subject||"Untitled Memo")}</div>
-          <div class="memoMeta">${esc(d.originatingOffice||"")} ${d.dateLogged?`· ${esc(formatMemoDate(d.dateLogged))}`:""}</div>
+          <div class="memoSubject">${highlightText(d.subject||"Untitled Memo", query)}</div>
+          <div class="memoMeta">${highlightText(d.originatingOffice||"", query)} ${d.dateLogged?`· ${esc(formatMemoDate(d.dateLogged))}`:""}</div>
         </div>
       </div>
       <div class="memoActions">
@@ -269,20 +281,36 @@ function renderLatestMemos(data){
         <button class="memoForward" type="button" data-memo-id="${esc(id)}" data-memo-action="print">Print Slip</button>
       </div>
     </div>`;
-  }).join("") : '<p class="muted">No memos found.</p>';
+  }).join("") : `
+    <div style="text-align:center;padding:34px 14px;color:#64748b">
+      <div style="font-size:15px;font-weight:700;color:#1e293b;margin-bottom:6px">No memos found</div>
+      <p style="margin:0 0 14px;font-size:13px">${query ? `No documents match "<strong>${esc(query)}</strong>". Try searching by tracking number, title, or office.` : "No memos found."}</p>
+      ${query ? `<button type="button" class="memoForward" id="memoClearEmptyBtn" style="margin:auto">Clear Search</button>` : ""}
+    </div>
+  `;
+
+  const totalUnfiltered = typeof data.totalUnfiltered === "number" ? data.totalUnfiltered : cachedAllMemos.length;
+  const countLabel = (query && totalUnfiltered)
+    ? `<span>${total.toLocaleString()} found (of ${totalUnfiltered.toLocaleString()} memos)</span>`
+    : `<span>${total.toLocaleString()} memo${total===1?'':'s'}</span>`;
 
   target.innerHTML=`${batchBar}
     <div class="memoSelectAllRow">
       <label><input type="checkbox" id="latestSelectAll" ${allChecked?'checked':''}> Select all visible</label>
-      <span>${total.toLocaleString()} memo${total===1?'':'s'}</span>
+      ${countLabel}
     </div>
     <div class="memoScrollList">${listHtml}</div>`;
+
+  $("memoClearEmptyBtn")?.addEventListener("click",()=>{
+    if($("homeId")) $("homeId").value="";
+    applyHomeSearch("");
+  });
 
   target.querySelectorAll(".memoSelect").forEach(box=>{
     box.addEventListener("change",()=>{
       const id=box.dataset.memoId||"";
       if(box.checked)selectedMemoIds.add(id);else selectedMemoIds.delete(id);
-      renderLatestMemos({...data,documents:rows});
+      renderLatestMemos({...data,documents:rows}, query);
     });
   });
 
@@ -293,12 +321,12 @@ function renderLatestMemos(data){
       if(!id)return;
       if(checked)selectedMemoIds.add(id);else selectedMemoIds.delete(id);
     });
-    renderLatestMemos({...data,documents:rows});
+    renderLatestMemos({...data,documents:rows}, query);
   });
 
   $("batchClearBtn")?.addEventListener("click",()=>{
     selectedMemoIds.clear();
-    renderLatestMemos({...data,documents:rows});
+    renderLatestMemos({...data,documents:rows}, query);
   });
 
   $("batchForwardBtn")?.addEventListener("click",()=>openBatchForwardModal([...selectedMemoIds]));
@@ -997,7 +1025,9 @@ async function openMemoModal(id,mode="view"){
 async function loadAllMemos(options={}){
   const target=$("latestMemos");
   if(!target)return;
-  target.innerHTML='<div class="box loading">Loading all memos...</div>';
+  if(!cachedAllMemos.length){
+    target.innerHTML='<div class="box loading">Loading all memos...</div>';
+  }
   try{
     const limit = Number(options.limit) || 5000;
     const d=await apiAction("getDocuments",{
@@ -1005,10 +1035,75 @@ async function loadAllMemos(options={}){
       offset: 0,
       sync: options.sync===true ? "true" : "false"
     });
-    renderLatestMemos(d);
+
+    let rows=Array.isArray(d?.documents)?d.documents:[];
+    const seenControlRefs=new Set();
+    const seenSubjectDates=new Set();
+    rows=rows.filter(item=>{
+      const id=String(item?.controlRefId||"").trim().toUpperCase();
+      const subjDate=String(item?.subject||"").trim().toLowerCase().replace(/\s+/g," ")+"|"+(item?.dateLogged||"");
+      if(!id)return true;
+      if(seenControlRefs.has(id))return false;
+      if(subjDate.length > 8 && seenSubjectDates.has(subjDate))return false;
+      seenControlRefs.add(id);
+      if(subjDate.length > 8) seenSubjectDates.add(subjDate);
+      return true;
+    });
+    cachedAllMemos=rows;
+
+    applyHomeSearch();
   }catch(e){
     target.innerHTML=`<div class="error">Unable to load memos: ${esc(e.message)}</div>`;
   }
+}
+
+function applyHomeSearch(searchQuery){
+  const input=$("homeId");
+  const clearBtn=$("homeSearchClear");
+  const query = typeof searchQuery === "string" ? searchQuery : (input?.value || "");
+  currentSearchQuery = query.trim();
+
+  if(clearBtn){
+    clearBtn.style.display = currentSearchQuery ? "grid" : "none";
+  }
+
+  if(!cachedAllMemos || !cachedAllMemos.length){
+    return;
+  }
+
+  if(!currentSearchQuery){
+    renderLatestMemos({result:"success", documents:cachedAllMemos}, "");
+    return;
+  }
+
+  const terms = currentSearchQuery.toLowerCase().split(/\s+/).filter(Boolean);
+  const filtered = cachedAllMemos.filter(item=>{
+    const id = String(item?.controlRefId||"").toLowerCase();
+    const subj = String(item?.subject||"").toLowerCase();
+    const office = String(item?.originatingOffice||"").toLowerCase();
+    const recBy = String(item?.receivedBy||"").toLowerCase();
+    const person = String(item?.currentPersonnel||"").toLowerCase();
+    const sec = String(item?.currentSection||"").toLowerCase();
+    const act = String(item?.actionRequired||"").toLowerCase();
+    const type = String(item?.memoType||"").toLowerCase();
+
+    return terms.every(term =>
+      id.includes(term) ||
+      subj.includes(term) ||
+      office.includes(term) ||
+      recBy.includes(term) ||
+      person.includes(term) ||
+      sec.includes(term) ||
+      act.includes(term) ||
+      type.includes(term)
+    );
+  });
+
+  renderLatestMemos({
+    result:"success",
+    documents:filtered,
+    totalUnfiltered: cachedAllMemos.length
+  }, currentSearchQuery);
 }
 
 async function latestMemos(){
@@ -1056,7 +1151,19 @@ async function dashboard(){
 
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>page(b.dataset.page));
 $("menu").onclick=()=>document.querySelector("nav").classList.toggle("open");
-$("homeTrack").onclick=()=>{page("track");$("trackId").value=$("homeId").value;find($("homeId").value,$("result"))};
+$("homeId")?.addEventListener("input",()=>applyHomeSearch());
+$("homeSearchClear")?.addEventListener("click",()=>{
+  if($("homeId")){
+    $("homeId").value="";
+    $("homeId").focus();
+  }
+  applyHomeSearch("");
+});
+$("homeTrack").onclick=()=>{
+  applyHomeSearch();
+  const target=$("latestMemos");
+  if(target) target.scrollIntoView({behavior:"smooth",block:"nearest"});
+};
 $("trackBtn").onclick=()=>find($("trackId").value,$("result"));
 $("routeLoad").onclick=()=>find($("routeId").value,$("routeResult"),true);
 document.addEventListener("click",e=>{

@@ -52,10 +52,19 @@
     <div><span>Concurred / Approved</span><strong id="completed">-</strong></div>
   </div>
 
-  <div class="box">
-    <h2>Find a Document</h2>
-    <input id="homeId" placeholder="Enter Control Ref ID" autocomplete="off">
-    <button class="mainBtn" id="homeTrack">Track Document</button>
+  <div class="box searchBox">
+    <div class="searchBoxHeader">
+      <h2>Search Documents</h2>
+      <p class="muted">Search across memos and documents by tracking number, title, or subject.</p>
+    </div>
+    <div class="searchRow">
+      <div class="searchInputWrap">
+        <span class="searchIcon" aria-hidden="true">🔍</span>
+        <input id="homeId" placeholder="Search by Tracking No., Title, or Subject..." autocomplete="off">
+        <button id="homeSearchClear" class="searchClearBtn" type="button" aria-label="Clear search" style="display:none;">✕</button>
+      </div>
+      <button class="mainBtn searchBtn" id="homeTrack" type="button">Search</button>
+    </div>
   </div>
 
   <div id="connectionStatus" class="connection pending">Connecting to PRO4A RCD Supabase Database...</div>
